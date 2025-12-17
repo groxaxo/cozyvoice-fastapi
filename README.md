@@ -101,6 +101,61 @@ For **batch offline processing** (1000s of files), see [FlashCosyVoice](https://
 
 ---
 
+## 🔧 Deployment Management
+
+### Server Lifecycle
+
+**Start Server:**
+```bash
+# Standard server (port 8000)
+./run_cosyvoice_autonomous.sh
+
+# vLLM-accelerated server (port 8001, recommended)
+export CUDA_VISIBLE_DEVICES=2  # Specify GPU
+nohup ./run_cosyvoice_vllm.sh > server.log 2>&1 &
+```
+
+**Stop Server:**
+```bash
+# Clean shutdown of all server instances
+./cleanup_servers.sh
+```
+
+**Check Server Status:**
+```bash
+# Health check
+curl http://localhost:8001/health
+
+# Warm up model (first request after start)
+curl -X POST http://localhost:8001/v1/warmup
+
+# Check process count (should be 2: wrapper + worker)
+ps aux | grep "uvicorn openai_tts_cosyvoice" | grep -v grep | wc -l
+
+# Monitor GPU memory
+nvidia-smi --query-gpu=index,memory.used --format=csv -i 2
+```
+
+### Deployment Features
+
+✅ **Model stays in memory** - Loaded once at startup, persists across requests  
+✅ **No reloading** - FastAPI keeps model in GPU memory (~7-15GB)  
+✅ **Single instance** - Optimized startup script prevents duplicates  
+✅ **Graceful shutdown** - `cleanup_servers.sh` stops all processes cleanly  
+✅ **Health monitoring** - `/health` and `/v1/warmup` endpoints for testing
+
+### Performance Metrics
+
+| Metric | Value |
+|--------|-------|
+| **GPU Memory** | 7-15GB (stable) |
+| **First Request** | ~7s (model warmup) |
+| **Subsequent Requests** | ~5s (cache hit) |
+| **Process Count** | 2 (wrapper + worker) |
+| **Latency (streaming)** | ~150ms |
+
+---
+
 ### Running the Server
 
 ```bash

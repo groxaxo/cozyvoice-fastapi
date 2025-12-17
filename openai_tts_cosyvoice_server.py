@@ -42,34 +42,28 @@ except ImportError:
     sys.exit(1)
 
 # Initialize model
-# Adjust path to be relative to where we run the server
 MODEL_DIR = "CosyVoice/pretrained_models/Fun-CosyVoice3-0.5B-2512"
 if not os.path.exists(MODEL_DIR):
-    # Fallback or error
     print(f"Warning: Model directory {MODEL_DIR} not found.")
 
 print(f"Loading CosyVoice model from {MODEL_DIR}...")
 print(f"Configuration: vLLM={USE_VLLM}, TensorRT={USE_TRT}, FP16={FP16}")
 
-# Initialize model with vLLM/TRT support if requested
+# Initialize model with vLLM/TRT support
 try:
     cosyvoice_model = AutoModel(
         model_dir=MODEL_DIR, load_vllm=USE_VLLM, load_trt=USE_TRT, fp16=FP16
     )
     print(f"✅ Model loaded successfully")
-    if USE_VLLM:
-        print("🚀 vLLM acceleration enabled (expect 2-4x speedup)")
-    if USE_TRT:
-        print("🚀 TensorRT acceleration enabled")
 except Exception as e:
-    print(f"❌ Error loading model with vLLM/TRT: {e}")
+    print(f"❌ Error loading model: {e}")
     print("   Falling back to standard PyTorch backend...")
     cosyvoice_model = AutoModel(model_dir=MODEL_DIR)
     USE_VLLM = False
     USE_TRT = False
     print("✅ Model loaded with standard backend")
 
-# ---------- Text cleaning (Kokoro-style intent: sanitize + normalize flags) ----------
+# ---------- Text cleaning ----------
 _MD_CODEBLOCK_RE = re.compile(r"```.*?```", re.DOTALL)
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 _MD_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
@@ -100,7 +94,6 @@ _UNIT_MAP = {
 
 
 def _unit_normalize(text: str) -> str:
-    # Examples: 10KB -> "10 kilobytes", 2.4GHz -> "2.4 gigahertz"
     def repl(m):
         num = m.group("num")
         unit = m.group("unit").lower()
@@ -116,47 +109,28 @@ def _unit_normalize(text: str) -> str:
 
 
 def clean_text_for_tts(
-    text: str,
-    normalize: bool = True,
-    unit_normalization: bool = True,
+    text: str, normalize: bool = True, unit_normalization: bool = True
 ) -> str:
     if not isinstance(text, str):
         text = str(text)
-
-    # Unicode normalize (helps with weird punctuation/width variants)
     text = unicodedata.normalize("NFKC", text)
-
-    # Remove code blocks (markdown)
     text = _MD_CODEBLOCK_RE.sub(" ", text)
-
-    # Convert markdown links: [label](url) -> label
     text = _MD_LINK_RE.sub(r"\1", text)
-
-    # Strip HTML tags
     text = _HTML_TAG_RE.sub(" ", text)
-
-    # Remove control chars
     text = _CONTROL_CHARS_RE.sub("", text)
-
-    # Normalize whitespace/newlines
     text = text.replace("\u00a0", " ")
     text = _MULTI_WS_RE.sub(" ", text).strip()
-
     if normalize:
-        # Common punctuation normalizations
         text = text.replace("…", "...")
         text = text.replace("—", "-").replace("–", "-")
         text = re.sub(r"[“”]", '"', text)
         text = re.sub(r"[‘’]", "'", text)
-
     if unit_normalization:
         text = _unit_normalize(text)
-
     return text.strip()
 
 
 def split_for_tts(text: str, max_chars: int = 350) -> List[str]:
-    # Simple sentence-ish splitting to avoid very long contexts
     if len(text) <= max_chars:
         return [text]
     parts = re.split(r"(?<=[\.\?\!。！？])\s+", text)
@@ -184,46 +158,15 @@ class NormalizationOptions(BaseModel):
 class SpeechRequest(BaseModel):
     model: str = "cosyvoice3"
     input: str
-    voice: Optional[str] = None  # you can map this to a speaker/prompt later
-    response_format: str = "wav"  # mp3/wav/flac/opus...
+    voice: Optional[str] = None
+    response_format: str = "wav"
     speed: float = 1.0
     stream: bool = False
     normalization_options: Optional[NormalizationOptions] = None
 
 
-# ---------- CosyVoice inference hook ----------
 # ---------- Voice + language instruction system ----------
-# Voice samples directory
 VOICE_SAMPLES_DIR = "voice_samples"
-
-# Female voice prompts - Capital cities used as accent/style anchors
-LANGUAGE_FEMALE_PROMPTS = {
-    "es": "Eres una mujer de Buenos Aires, Argentina. Tu voz es femenina, elegante, carismática y muy expresiva. Habla con pasión y calidez, como una actriz profesional argentina.",
-    "en": "You are a woman from London, England. Your voice is female, posh, charismatic, and highly expressive. Speak with refined British elegance and captivating warmth, like a professional British actress.",
-    "fr": "Tu es une femme de Paris, France. Ta voix est féminine, élégante, charismatique et très expressive. Parle avec sophistication et charme parisien, comme une actrice professionnelle française.",
-    "it": "Sei una donna di Roma, Italia. La tua voce è femminile, elegante, carismatica e molto espressiva. Parla con passione e calore romano, come un'attrice professionista italiana.",
-    "pt": "És uma mulher de Lisboa, Portugal. A tua voz é feminina, elegante, carismática e muito expressiva. Fala com sofisticação e calor lisboeta, como uma atriz profissional portuguesa.",
-    "de": "Du bist eine Frau aus Berlin, Deutschland. Deine Stimme ist weiblich, elegant, charismatisch und sehr ausdrucksstark. Sprich mit Berliner Raffinesse und Wärme, wie eine professionelle deutsche Schauspielerin.",
-    "ja": "あなたは東京出身の女性です。あなたの声は女性的で、上品で、カリスマ的で、非常に表現豊かです。プロの日本人女優のように、洗練された東京のエレガンスと魅力的な温かさで話してください。",
-    "ko": "당신은 서울 출신 여성입니다. 당신의 목소리는 여성스럽고, 우아하며, 카리스마 있고, 매우 표현력이 풍부합니다. 전문 한국 배우처럼 세련된 서울의 우아함과 매력적인 따뜻함으로 말하세요.",
-    "zh": "你是来自北京的女性。你的声音是女性化的、优雅的、有魅力的、非常有表现力的。请像专业的中国女演员一样，以精致的北京优雅和迷人的温暖说话。",
-}
-
-# Male voice prompts - Capital cities used as accent/style anchors
-LANGUAGE_MALE_PROMPTS = {
-    "es": "Eres un hombre de Buenos Aires, Argentina. Tu voz es masculina, elegante, carismática y muy expresiva. Habla con pasión y calidez, como un actor profesional argentino con clase y distinción.",
-    "en": "You are a man from London, England. Your voice is male, posh, charismatic, and highly expressive. Speak with refined British elegance and captivating warmth, like a distinguished British gentleman and professional actor.",
-    "fr": "Tu es un homme de Paris, France. Ta voix est masculine, élégante, charismatique et très expressive. Parle avec sophistication et charme parisien, comme un acteur professionnel français.",
-    "it": "Sei un uomo di Roma, Italia. La tua voce è maschile, elegante, carismatica e molto espressiva. Parla con passione e calore romano, come un attore professionista italiano.",
-    "pt": "És um homem de Lisboa, Portugal. A tua voz é masculina, elegante, carismática e muito expressiva. Fala com sofisticação e calor lisboeta, como um ator profissional português.",
-    "de": "Du bist ein Mann aus Berlin, Deutschland. Deine Stimme ist männlich, elegant, charismatisch und sehr ausdrucksstark. Sprich mit Berliner Raffinesse und Wärme, wie ein professioneller deutscher Schauspieler.",
-    "ja": "あなたは東京出身の男性です。あなたの声は男性的で、上品で、カリスマ的で、非常に表現豊かです。プロの日本人俳優のように、洗練された東京のエレガンスと魅力的な温かさで話してください。",
-    "ko": "당신은 서울 출신 남성입니다. 당신의 목소리는 남성스럽고, 우아하며, 카리스마 있고, 매우 표현력이 풍부합니다. 전문 한국 배우처럼 세련된 서울의 우아함과 매력적인 따뜻함으로 말하세요.",
-    "zh": "你是来自北京的男性。你的声音是男性化的、优雅的、有魅力的、非常有表现力的。请像专业的中国男演员一样，以精致的北京优雅和迷人的温暖说话。",
-}
-
-# For backward compatibility
-LANGUAGE_CAPITAL_INSTRUCTIONS = LANGUAGE_FEMALE_PROMPTS
 
 # Male voice names
 MALE_VOICE_NAMES = {
@@ -264,15 +207,36 @@ VOICE_LANGUAGE_MAP = {
     "korean": "ko",
     "zh": "zh",
     "chinese": "zh",
-    "multilingual": "en",
-    "default": "en",
 }
 
-VOICE_BASE_INSTRUCTION = "You are a professional voice actor."
+# Female voice prompts - Short and descriptive (following CosyVoice3 examples)
+LANGUAGE_FEMALE_PROMPTS = {
+    "es": "Voz femenina argentina, elegante.",
+    "en": "Female British voice, elegant.",
+    "fr": "Voix féminine française, élégante.",
+    "it": "Voce femminile italiana, elegante.",
+    "pt": "Voz feminina portuguesa, elegante.",
+    "de": "Weibliche deutsche Stimme, elegant.",
+    "ja": "上品な日本人の女性の声。",
+    "ko": "우아한 한국 여성의 목소리.",
+    "zh": "优雅的北京女性声音。",
+}
+
+# Male voice prompts
+LANGUAGE_MALE_PROMPTS = {
+    "es": "Voz masculina argentina, distinguida.",
+    "en": "Male British voice, distinguished.",
+    "fr": "Voix masculine française, distinguée.",
+    "it": "Voce maschile italiana, distinta.",
+    "pt": "Voz masculina portuguesa, distinta.",
+    "de": "Männliche deutsche Stimme, vornehm.",
+    "ja": "日本人の男性の声、独特。",
+    "ko": "색다른 한국 남성의 목소리.",
+    "zh": "有表现力的北京男性声音。",
+}
 
 
 def discover_voice_samples():
-    """Discover available voice samples from the voice_samples directory."""
     voice_map = {}
     if os.path.exists(VOICE_SAMPLES_DIR):
         for filename in os.listdir(VOICE_SAMPLES_DIR):
@@ -283,36 +247,14 @@ def discover_voice_samples():
 
 
 def get_voice_file(voice: Optional[str]) -> str:
-    """Get the voice file path for a given voice name."""
-    # Discover available voices
     available_voices = discover_voice_samples()
-
     if not voice:
-        # Default voice
-        if "default" in available_voices:
-            return available_voices["default"]
-        return "CosyVoice/asset/zero_shot_prompt.wav"
-
+        return available_voices.get("default", "CosyVoice/asset/zero_shot_prompt.wav")
     voice_key = voice.lower()
-
-    # Direct match (exact name)
     if voice_key in available_voices:
         return available_voices[voice_key]
-
-    # Detect target language from voice parameter or mapping
     detected_lang = None
-
-    # Check if voice already has language suffix
-    if voice_key.endswith("-es") or voice_key.endswith("-en"):
-        if voice_key in available_voices:
-            return available_voices[voice_key]
-        # Extract base name
-        base_voice = voice_key.rsplit("-", 1)[0]
-        if base_voice in available_voices:
-            return available_voices[base_voice]
-
-    # Try to match by language code in voice name
-    for lang_code in LANGUAGE_CAPITAL_INSTRUCTIONS.keys():
+    for lang_code in LANGUAGE_FEMALE_PROMPTS.keys():
         if (
             voice_key.startswith(lang_code)
             or f"-{lang_code}" in voice_key
@@ -320,138 +262,70 @@ def get_voice_file(voice: Optional[str]) -> str:
         ):
             detected_lang = lang_code
             break
-
-    # Check VOICE_LANGUAGE_MAP
-    if voice_key in VOICE_LANGUAGE_MAP:
-        detected_lang = VOICE_LANGUAGE_MAP[voice_key]
-
-    # Try to find voice with language suffix
+    if not detected_lang:
+        detected_lang = VOICE_LANGUAGE_MAP.get(voice_key)
     if detected_lang:
-        # Try voice_name-lang (e.g., "aimee-en")
         suffixed_voice = f"{voice_key}-{detected_lang}"
         if suffixed_voice in available_voices:
             return available_voices[suffixed_voice]
-
-    # Try language-specific voice files
-    if detected_lang and detected_lang in available_voices:
-        return available_voices[detected_lang]
-
-    # Fallback to multilingual or default
-    if "multilingual" in available_voices:
-        return available_voices["multilingual"]
-    if "default" in available_voices:
-        return available_voices["default"]
-
-    return "CosyVoice/asset/zero_shot_prompt.wav"
+        if detected_lang in available_voices:
+            return available_voices[detected_lang]
+    return available_voices.get("default", "CosyVoice/asset/zero_shot_prompt.wav")
 
 
 def build_prompt_text(voice: Optional[str]) -> str:
-    """Build prompt text for CosyVoice3 following best practices.
-
-    According to CosyVoice3 documentation, prompt_text should be a SHORT descriptive
-    phrase about the voice style (e.g., "A warm, professional tone").
-    The <|endofprompt|> token separates this description from the actual TTS text.
-    """
+    """Build CosyVoice3 instruct prompt with correct system prefix and end token."""
+    base_prompt = "You are a helpful assistant."
     if not voice:
-        return "A natural and professional voice.<|endofprompt|>"
+        return f"{base_prompt}<|endofprompt|>"
 
     voice_key = voice.lower()
+    is_male = any(name in voice_key for name in MALE_VOICE_NAMES)
 
-    # Detect gender
-    is_male = False
-    voice_base = (
-        voice_key.replace("-es", "")
-        .replace("-en", "")
-        .replace("-fr", "")
-        .replace("-de", "")
-    )
-    for male_name in MALE_VOICE_NAMES:
-        if male_name in voice_base:
-            is_male = True
-            break
-
-    # Detect language
     detected_lang = None
-    if "-es" in voice_key or voice_key == "es":
-        detected_lang = "es"
-    elif "-en" in voice_key or voice_key == "en":
-        detected_lang = "en"
-    elif "-fr" in voice_key or voice_key == "fr":
-        detected_lang = "fr"
-    elif "-de" in voice_key or voice_key == "de":
-        detected_lang = "de"
-    elif "-it" in voice_key or voice_key == "it":
-        detected_lang = "it"
-    elif "-pt" in voice_key or voice_key == "pt":
-        detected_lang = "pt"
-    elif "-ja" in voice_key or voice_key == "ja":
-        detected_lang = "ja"
-    elif "-ko" in voice_key or voice_key == "ko":
-        detected_lang = "ko"
-    elif "-zh" in voice_key or voice_key == "zh":
-        detected_lang = "zh"
-    elif voice_key in VOICE_LANGUAGE_MAP:
-        detected_lang = VOICE_LANGUAGE_MAP[voice_key]
+    for lang in ["es", "en", "fr", "de", "it", "pt", "ja", "ko", "zh"]:
+        if f"-{lang}" in voice_key or voice_key == lang:
+            detected_lang = lang
+            break
+    if not detected_lang:
+        detected_lang = VOICE_LANGUAGE_MAP.get(voice_key)
 
-    # Build appropriate short descriptive phrase
-    if detected_lang == "es":
-        if is_male:
-            return "Una voz masculina argentina, cálida y profesional.<|endofprompt|>"
-        else:
-            return "Una voz femenina argentina, elegante y profesional.<|endofprompt|>"
-    elif detected_lang == "en":
-        if is_male:
-            return "A male British voice, warm and professional.<|endofprompt|>"
-        else:
-            return "A female British voice, elegant and professional.<|endofprompt|>"
-    elif detected_lang == "fr":
-        if is_male:
-            return "Une voix masculine française, chaleureuse et professionnelle.<|endofprompt|>"
-        else:
-            return "Une voix féminine française, élégante et professionnelle.<|endofprompt|>"
-    elif detected_lang == "de":
-        if is_male:
-            return (
-                "Eine männliche deutsche Stimme, warm und professionell.<|endofprompt|>"
-            )
-        else:
-            return "Eine weibliche deutsche Stimme, elegant und professionell.<|endofprompt|>"
-    else:
-        # Default for other languages
-        return "A natural and professional voice.<|endofprompt|>"
+    prompts = LANGUAGE_MALE_PROMPTS if is_male else LANGUAGE_FEMALE_PROMPTS
+    instruction = prompts.get(detected_lang, "A natural and professional voice.")
+
+    # FORMAT: "You are a helpful assistant. [Instruction]<|endofprompt|>"
+    return f"{base_prompt} {instruction}<|endofprompt|>"
 
 
 def cosyvoice_generate_wav(
     text: str, voice: Optional[str], speed: float
 ) -> Tuple[np.ndarray, int]:
-    """
-    Return (audio_float32, sample_rate).
-    """
-    # Build dynamic instruction prompt based on voice/language
     prompt_text = build_prompt_text(voice)
-
-    # Get the appropriate voice file based on voice name/language
     prompt_wav = get_voice_file(voice)
-
-    # Run inference
-    # inference_zero_shot yields results. We collect them.
-    # Note: speed parameter is supported in CosyVoice3 inference_zero_shot
-
     audios = []
-    for j in cosyvoice_model.inference_zero_shot(
-        text, prompt_text, prompt_wav, stream=False, speed=speed
-    ):
-        audios.append(j["tts_speech"].cpu().numpy())
+
+    # CosyVoice3 uses inference_instruct2 for combining instructions with reference audio
+    if hasattr(cosyvoice_model, "inference_instruct2"):
+        print(
+            f"DEBUG: Using CosyVoice3 inference_instruct2 | Voice: {voice} | Prompt: {prompt_text}"
+        )
+        for j in cosyvoice_model.inference_instruct2(
+            text, prompt_text, prompt_wav, stream=False, speed=speed
+        ):
+            audios.append(j["tts_speech"].cpu().numpy())
+    else:
+        # Fallback to zero_shot if instruct2 is not available (though it should be for CosyVoice3)
+        print(
+            f"DEBUG: Using fallback inference_zero_shot | Voice: {voice} | Prompt: {prompt_text}"
+        )
+        for j in cosyvoice_model.inference_zero_shot(
+            text, prompt_text, prompt_wav, stream=False, speed=speed
+        ):
+            audios.append(j["tts_speech"].cpu().numpy())
 
     if not audios:
-        raise RuntimeError("No audio generated by CosyVoice")
-
-    # Concatenate if multiple chunks (though usually one for short text)
-    full_audio = np.concatenate(audios, axis=1)  # shape (1, N)
-
-    # Squeeze to 1D array
-    full_audio = full_audio.squeeze()
-
+        raise RuntimeError("No audio generated")
+    full_audio = np.concatenate(audios, axis=1).squeeze()
     return full_audio.astype(np.float32), cosyvoice_model.sample_rate
 
 
@@ -461,18 +335,11 @@ def encode_audio(audio: np.ndarray, sr: int, fmt: str) -> bytes:
     if fmt in ("wav", "wave"):
         sf.write(buf, audio, sr, format="WAV")
         return buf.getvalue()
-
-    # For mp3/opus/aac: easiest is ffmpeg (pydub or direct subprocess).
-    # Keep it simple: write wav then transcode with ffmpeg.
-    import tempfile
-    import subprocess
+    import tempfile, subprocess
 
     with tempfile.TemporaryDirectory() as td:
-        wav_path = os.path.join(td, "out.wav")
-        out_path = os.path.join(td, f"out.{fmt}")
+        wav_path, out_path = os.path.join(td, "out.wav"), os.path.join(td, f"out.{fmt}")
         sf.write(wav_path, audio, sr, format="WAV")
-
-        # Basic ffmpeg transcode
         cmd = ["ffmpeg", "-y", "-i", wav_path]
         if fmt == "mp3":
             cmd += ["-codec:a", "libmp3lame", "-q:a", "2"]
@@ -483,18 +350,14 @@ def encode_audio(audio: np.ndarray, sr: int, fmt: str) -> bytes:
         elif fmt == "flac":
             cmd += ["-codec:a", "flac"]
         else:
-            raise ValueError(f"Unsupported response_format: {fmt}")
-
+            raise ValueError(f"Unsupported format: {fmt}")
         cmd.append(out_path)
         subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
         with open(out_path, "rb") as f:
             return f.read()
 
 
-# ---------- FastAPI app ----------
 API_KEY = os.environ.get("TTS_API_KEY", "not-needed")
-
 app = FastAPI(title="CosyVoice3 OpenAI-Compatible TTS")
 
 
@@ -504,9 +367,25 @@ def health():
         "status": "ok",
         "model": "cosyvoice3",
         "backend": "vllm" if USE_VLLM else "pytorch",
-        "tensorrt": USE_TRT,
-        "fp16": FP16,
     }
+
+
+@app.post("/v1/warmup")
+def warmup():
+    """Pre-warm the model with a dummy request to ensure it's loaded and cached."""
+    try:
+        test_text = "Hello world"
+        test_voice = "en"
+        audio, sr = cosyvoice_generate_wav(test_text, test_voice, speed=1.0)
+        return {
+            "status": "warmed",
+            "model": "cosyvoice3",
+            "backend": "vllm" if USE_VLLM else "pytorch",
+            "sample_rate": sr,
+            "audio_duration_ms": int((len(audio) / sr) * 1000),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Warmup failed: {str(e)}")
 
 
 @app.get("/v1/models")
@@ -516,105 +395,47 @@ def list_models():
 
 @app.get("/v1/voices")
 def list_voices():
-    """List all available voice samples with metadata."""
     available_voices = discover_voice_samples()
-
     voices_info = []
     for voice_name, voice_path in available_voices.items():
-        # Extract language from filename
-        language = "unknown"
-        if "-es" in voice_name:
-            language = "es"
-        elif "-en" in voice_name:
-            language = "en"
-        elif "-fr" in voice_name:
-            language = "fr"
-        elif "-it" in voice_name:
-            language = "it"
-        elif "-pt" in voice_name:
-            language = "pt"
-        elif "-de" in voice_name:
-            language = "de"
-        elif "-ja" in voice_name:
-            language = "ja"
-        elif "-ko" in voice_name:
-            language = "ko"
-        elif "-zh" in voice_name:
-            language = "zh"
-        elif voice_name in ["es", "en", "fr", "it", "pt", "de", "ja", "ko", "zh"]:
-            language = voice_name
-
-        # Detect gender
-        gender = "female"
-        voice_base = voice_name.replace("-es", "").replace("-en", "")
-        for male_name in MALE_VOICE_NAMES:
-            if male_name in voice_base:
-                gender = "male"
+        language = "en"
+        for lang in ["es", "en", "fr", "it", "pt", "de", "ja", "ko", "zh"]:
+            if f"-{lang}" in voice_name or voice_name == lang:
+                language = lang
                 break
-
-        # Get file size
-        file_size = 0
-        if os.path.exists(voice_path):
-            file_size = os.path.getsize(voice_path)
-
-        voices_info.append(
-            {
-                "id": voice_name,
-                "language": language,
-                "gender": gender,
-                "file_path": voice_path,
-                "file_size": file_size,
-            }
+        gender = (
+            "male"
+            if any(name in voice_name.lower() for name in MALE_VOICE_NAMES)
+            else "female"
         )
-
-    # Sort by language then name
-    voices_info.sort(key=lambda x: (x["language"], x["id"]))
-
-    return {"object": "list", "data": voices_info, "total": len(voices_info)}
+        voices_info.append({"id": voice_name, "language": language, "gender": gender})
+    return {"object": "list", "data": voices_info}
 
 
 @app.post("/v1/audio/speech")
 def audio_speech(
     req: SpeechRequest, authorization: Optional[str] = Header(default=None)
 ):
-    # Simple API key check (Open-WebUI will send: Authorization: Bearer <key>)
-    # If API_KEY is "not-needed", we skip the check.
     if API_KEY and API_KEY not in ["changeme", "not-needed"]:
         if not authorization or not authorization.startswith("Bearer "):
-            raise HTTPException(status_code=401, detail="Missing Bearer token")
-        token = authorization.split(" ", 1)[1].strip()
-        if token != API_KEY:
-            raise HTTPException(status_code=401, detail="Invalid API key")
-
+            raise HTTPException(status_code=401)
+        if authorization.split(" ", 1)[1].strip() != API_KEY:
+            raise HTTPException(status_code=401)
     norm = req.normalization_options or NormalizationOptions()
     cleaned = clean_text_for_tts(
         req.input, normalize=norm.normalize, unit_normalization=norm.unit_normalization
     )
     chunks = split_for_tts(cleaned)
-
-    # Generate audio per chunk and concatenate
-    audios = []
-    sr = None
+    audios, sr = [], None
     for chunk in chunks:
         audio, this_sr = cosyvoice_generate_wav(chunk, req.voice, req.speed)
         if sr is None:
             sr = this_sr
-        elif sr != this_sr:
-            raise HTTPException(
-                status_code=500, detail="Sample rate mismatch between chunks"
-            )
         audios.append(audio)
-
     if sr is None:
-        raise HTTPException(status_code=400, detail="Empty input after cleaning")
-
+        raise HTTPException(status_code=400, detail="Empty input")
     full = np.concatenate(audios).astype(np.float32)
-
-    try:
-        payload = encode_audio(full, sr, req.response_format)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
+    payload = encode_audio(full, sr, req.response_format)
     media = {
         "wav": "audio/wav",
         "mp3": "audio/mpeg",
@@ -622,7 +443,6 @@ def audio_speech(
         "aac": "audio/aac",
         "flac": "audio/flac",
     }.get(req.response_format.lower(), "application/octet-stream")
-
     if req.stream:
         return StreamingResponse(io.BytesIO(payload), media_type=media)
     return Response(content=payload, media_type=media)

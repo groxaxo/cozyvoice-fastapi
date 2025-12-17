@@ -29,15 +29,32 @@ if ! conda env list | grep -q "^$ENV_NAME "; then
     exit 1
 fi
 
-# Launch server with auto-restart
-while true; do
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - Starting server..."
-    
-    conda run -n $ENV_NAME python openai_tts_cosyvoice_server.py \
-        --port $PORT \
-        --host 0.0.0.0 \
-        || {
-            echo "$(date '+%Y-%m-%d %H:%M:%S') - Server crashed! Restarting in 5 seconds..."
-            sleep 5
-        }
-done
+# Check if already running on this port
+if lsof -i :$PORT > /dev/null 2>&1; then
+    echo "❌ Error: Port $PORT is already in use!"
+    echo "   Run './cleanup_servers.sh' to stop existing servers first."
+    exit 1
+fi
+
+# Check GPU availability
+if ! nvidia-smi > /dev/null 2>&1; then
+    echo "❌ Error: No NVIDIA GPU detected!"
+    exit 1
+fi
+
+# Verify GPU 2 is available if CUDA_VISIBLE_DEVICES is set
+if [ -n "$CUDA_VISIBLE_DEVICES" ]; then
+    echo "🎮 Using GPU(s): $CUDA_VISIBLE_DEVICES"
+fi
+
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Starting server..."
+echo "📊 Press Ctrl+C to stop the server"
+echo ""
+
+# Launch server (no auto-restart - use systemd/supervisor for that)
+# exec replaces the shell with uvicorn, ensuring clean shutdown on SIGTERM
+exec conda run -n $ENV_NAME uvicorn openai_tts_cosyvoice_server:app \
+    --port $PORT \
+    --host 0.0.0.0 \
+    --workers 1 \
+    --log-level info
