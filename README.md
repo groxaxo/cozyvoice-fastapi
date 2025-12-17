@@ -56,18 +56,66 @@ cd voice_samples/
 - Clear, high-quality audio
 - Minimal background noise
 
+---
+
+## 🚀 Performance Optimization (Optional)
+
+### vLLM Acceleration
+
+For **2-4x faster inference**, enable vLLM acceleration:
+
+#### Prerequisites
+```bash
+# Create vLLM environment (if not exists)
+conda create -n cosyvoice3_vllm --clone cosyvoice3 -y
+conda activate cosyvoice3_vllm
+
+# Install vLLM
+pip install vllm==v0.9.0 transformers==4.51.3 numpy==1.26.4
+```
+
+#### Launch with vLLM
+```bash
+# Option 1: Use launch script (recommended)
+./run_cosyvoice_vllm.sh
+
+# Option 2: Manual launch
+export COSYVOICE_USE_VLLM="true"
+conda run -n cosyvoice3_vllm uvicorn openai_tts_cosyvoice_server:app \
+    --host 0.0.0.0 --port 8001
+```
+
+**Performance**: vLLM accelerates the LLM component ~3x, resulting in 2-4x overall speedup.
+
+#### Configuration Options
+
+| Environment Variable | Default | Description |
+|---------------------|---------|-------------|
+| `COSYVOICE_USE_VLLM` | `false` | Enable vLLM acceleration |
+| `COSYVOICE_USE_TRT` | `false` | Enable TensorRT acceleration |
+| `COSYVOICE_FP16` | `false` | Use FP16 precision (CosyVoice3 uses FP32) |
+
+**Note**: vLLM and TensorRT can be enabled simultaneously for maximum performance.
+
+For **batch offline processing** (1000s of files), see [FlashCosyVoice](https://github.com/xingchensong/FlashCosyVoice) which achieves 9x speedup through distributed processing.
+
+---
+
 ### Running the Server
 
 ```bash
-# Launch server (autonomous mode with auto-restart)
+# Standard server (port 8000)
 ./run_cosyvoice_autonomous.sh
+
+# vLLM-accelerated server (port 8001)
+./run_cosyvoice_vllm.sh
 
 # Or manually:
 export TTS_API_KEY="not-needed"
 conda run -n cosyvoice3 uvicorn openai_tts_cosyvoice_server:app --host 0.0.0.0 --port 8000
 ```
 
-The server will be available at `http://localhost:8000`
+The server will be available at `http://localhost:8000` (or `8001` for vLLM)
 
 ---
 
@@ -497,6 +545,20 @@ To add new voices or improve existing ones:
 2. Follow naming convention: `name-languagecode.wav` (e.g., `john-en.wav`)
 3. Ensure sample quality (clear audio, 3-10 seconds)
 4. Test with the API
+
+---
+
+---
+
+## 🙏 Credits & Acknowledgments
+
+This project builds upon the excellent work of:
+
+- **[CosyVoice](https://github.com/FunAudioLLM/CosyVoice)** - Base TTS model by FunAudioLLM
+- **[FlashCosyVoice](https://github.com/xingchensong/FlashCosyVoice)** - Inspiration for vLLM optimization strategies
+- **vLLM Team** - High-performance LLM inference engine
+
+The vLLM integration uses the official CosyVoice vLLM backend for accelerated inference.
 
 ---
 

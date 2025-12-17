@@ -15,6 +15,24 @@ from pydantic import BaseModel
 sys.path.append("CosyVoice")
 sys.path.append("CosyVoice/third_party/Matcha-TTS")
 
+# Check if vLLM is requested
+USE_VLLM = os.environ.get("COSYVOICE_USE_VLLM", "false").lower() == "true"
+USE_TRT = os.environ.get("COSYVOICE_USE_TRT", "false").lower() == "true"
+FP16 = os.environ.get("COSYVOICE_FP16", "false").lower() == "true"
+
+# Register vLLM model if needed
+if USE_VLLM:
+    try:
+        from vllm import ModelRegistry
+        from cosyvoice.vllm.cosyvoice2 import CosyVoice2ForCausalLM
+
+        ModelRegistry.register_model("CosyVoice2ForCausalLM", CosyVoice2ForCausalLM)
+        print("✅ vLLM model registered successfully")
+    except ImportError as e:
+        print(f"❌ Error: vLLM not available. Please install vllm==v0.9.0")
+        print(f"   Error details: {e}")
+        sys.exit(1)
+
 try:
     from cosyvoice.cli.cosyvoice import AutoModel
 except ImportError:
@@ -31,9 +49,25 @@ if not os.path.exists(MODEL_DIR):
     print(f"Warning: Model directory {MODEL_DIR} not found.")
 
 print(f"Loading CosyVoice model from {MODEL_DIR}...")
-# We use the same initialization as in example.py for CosyVoice3
-cosyvoice_model = AutoModel(model_dir=MODEL_DIR)
-print("Model loaded.")
+print(f"Configuration: vLLM={USE_VLLM}, TensorRT={USE_TRT}, FP16={FP16}")
+
+# Initialize model with vLLM/TRT support if requested
+try:
+    cosyvoice_model = AutoModel(
+        model_dir=MODEL_DIR, load_vllm=USE_VLLM, load_trt=USE_TRT, fp16=FP16
+    )
+    print(f"✅ Model loaded successfully")
+    if USE_VLLM:
+        print("🚀 vLLM acceleration enabled (expect 2-4x speedup)")
+    if USE_TRT:
+        print("🚀 TensorRT acceleration enabled")
+except Exception as e:
+    print(f"❌ Error loading model with vLLM/TRT: {e}")
+    print("   Falling back to standard PyTorch backend...")
+    cosyvoice_model = AutoModel(model_dir=MODEL_DIR)
+    USE_VLLM = False
+    USE_TRT = False
+    print("✅ Model loaded with standard backend")
 
 # ---------- Text cleaning (Kokoro-style intent: sanitize + normalize flags) ----------
 _MD_CODEBLOCK_RE = re.compile(r"```.*?```", re.DOTALL)
@@ -466,7 +500,13 @@ app = FastAPI(title="CosyVoice3 OpenAI-Compatible TTS")
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "model": "cosyvoice3"}
+    return {
+        "status": "ok",
+        "model": "cosyvoice3",
+        "backend": "vllm" if USE_VLLM else "pytorch",
+        "tensorrt": USE_TRT,
+        "fp16": FP16,
+    }
 
 
 @app.get("/v1/models")
