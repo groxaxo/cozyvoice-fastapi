@@ -14,6 +14,8 @@ This is an OpenAI-compatible TTS server using CosyVoice3.
     To activate:
     ```bash
     conda activate cosyvoice3
+    # Ensure compatible torchvision version
+    pip install torchvision==0.18.1+cu121 --index-url https://download.pytorch.org/whl/cu121
     ```
 
 3.  **Running the Server**:
