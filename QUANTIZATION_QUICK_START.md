@@ -12,7 +12,11 @@ This is a condensed guide for quickly implementing quantization in the CosyVoice
 ## Prerequisites
 
 ```bash
-conda activate cosyvoice3
+# First, verify your conda environment name
+conda env list  # Look for your CosyVoice environment
+
+# Activate using the correct environment name (default shown is 'cosyvoice3')
+conda activate cosyvoice3  # Replace with your actual environment name
 pip install bitsandbytes>=0.41.0 accelerate>=0.20.0
 ```
 
@@ -135,6 +139,7 @@ if torch.cuda.is_available():
 
 ```bash
 # Create test_vram.py
+# Note: Update MODEL_DIR to match your actual model location
 cat > test_vram.py << 'EOF'
 import sys
 import torch
@@ -142,8 +147,11 @@ sys.path.append('CosyVoice')
 
 from cosyvoice.cli.cosyvoice import AutoModel
 
+# Use the same MODEL_DIR as in your server
+MODEL_DIR = 'CosyVoice/pretrained_models/Fun-CosyVoice3-0.5B'
+
 print("Loading model...")
-model = AutoModel(model_dir='CosyVoice/pretrained_models/Fun-CosyVoice3-0.5B')
+model = AutoModel(model_dir=MODEL_DIR)
 
 if torch.cuda.is_available():
     vram = torch.cuda.memory_allocated() / 1024**3

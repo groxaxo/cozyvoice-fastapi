@@ -226,12 +226,13 @@ cosyvoice_model = AutoModel(
 1. **Install Dependencies**
    ```bash
    # Activate your CosyVoice environment (verify the name matches your setup)
-   conda activate cosyvoice3
+   # Check available environments with: conda env list
+   conda activate cosyvoice3  # Replace 'cosyvoice3' with your actual environment name
    pip install bitsandbytes>=0.41.0
    pip install accelerate>=0.20.0
    ```
    
-   Note: The conda environment name should match what's documented in your README. Check with `conda env list` if unsure.
+   **Important**: The conda environment name should match what's documented in your README. Check with `conda env list` if unsure.
 
 2. **Backup Current Setup**
    ```bash
@@ -255,6 +256,11 @@ cosyvoice_model = AutoModel(
 Create a new file: `CosyVoice/cosyvoice/cli/quantized_model.py` 
 
 Note: Alternatively, you can modify the existing `CosyVoice/cosyvoice/cli/cosyvoice.py` file directly where AutoModel is currently defined.
+
+**Important**: If CosyVoice is installed as a pip/conda package (not a local directory), you'll need to:
+- Fork the CosyVoice repository and install from your fork
+- Or apply monkey-patching at runtime (less recommended)
+- Or use the post-loading quantization approach (see Alternative Method in QUANTIZATION_QUICK_START.md)
 
 ```python
 """Quantized model loading for CosyVoice."""
