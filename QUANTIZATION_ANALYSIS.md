@@ -119,7 +119,7 @@ cosyvoice_model = AutoModel(
 CosyVoice uses custom PyTorch modules that may not be directly compatible with BitsAndBytes.
 
 **Solution:**
-1. Modify `CosyVoice/cosyvoice/cli/model.py` to accept `quantization_config` parameter
+1. Modify `CosyVoice/cosyvoice/cli/cosyvoice.py` (where AutoModel is located) to accept `quantization_config` parameter
 2. Apply quantization to specific submodules (LLM, Flow Matching)
 3. Keep vocoder in FP16 for quality
 
@@ -225,10 +225,13 @@ cosyvoice_model = AutoModel(
 
 1. **Install Dependencies**
    ```bash
+   # Activate your CosyVoice environment (verify the name matches your setup)
    conda activate cosyvoice3
    pip install bitsandbytes>=0.41.0
    pip install accelerate>=0.20.0
    ```
+   
+   Note: The conda environment name should match what's documented in your README. Check with `conda env list` if unsure.
 
 2. **Backup Current Setup**
    ```bash
@@ -249,7 +252,9 @@ cosyvoice_model = AutoModel(
 
 **Step 1: Modify CosyVoice Library**
 
-Create a new file: `CosyVoice/cosyvoice/cli/quantized_model.py`
+Create a new file: `CosyVoice/cosyvoice/cli/quantized_model.py` 
+
+Note: Alternatively, you can modify the existing `CosyVoice/cosyvoice/cli/cosyvoice.py` file directly where AutoModel is currently defined.
 
 ```python
 """Quantized model loading for CosyVoice."""
@@ -378,7 +383,7 @@ def benchmark_inference(text, num_runs=5):
         for j in cosyvoice_model.inference_zero_shot(
             text, 
             'You are a helpful assistant.<|endofprompt|>希望你以后能够做的比我还好呦。',
-            'CosyVoice/asset/zero_shot_prompt.wav',
+            'CosyVoice/asset/zero_shot_prompt.wav',  # Verify this path exists in your setup
             stream=False,
             speed=1.0
         ):
