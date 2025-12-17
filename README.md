@@ -34,3 +34,11 @@ This is an OpenAI-compatible TTS server using CosyVoice3.
 ## Notes
 *   The server uses `Fun-CosyVoice3-0.5B` model.
 *   It includes text cleaning and normalization.
+
+## VRAM Optimization
+
+To reduce GPU memory usage, see:
+- **[QUANTIZATION_QUICK_START.md](QUANTIZATION_QUICK_START.md)** - Quick implementation guide
+- **[QUANTIZATION_ANALYSIS.md](QUANTIZATION_ANALYSIS.md)** - Comprehensive analysis
+
+Using 8-bit quantization can reduce VRAM usage from ~2GB to ~1GB with minimal quality impact.
