@@ -20,14 +20,15 @@ This is an OpenAI-compatible TTS server using CosyVoice3.
 
 3.  **Running the Server**:
     ```bash
-    export TTS_API_KEY="your-secret-key"
+    # Default is "not-needed" (no auth)
+    export TTS_API_KEY="not-needed" 
     uvicorn openai_tts_cosyvoice_server:app --host 0.0.0.0 --port 8000
     ```
 
 4.  **Usage with Open-WebUI**:
     *   **Text-to-Speech Engine**: OpenAI
     *   **API Base URL**: `http://YOUR_SERVER_IP:8000/v1`
-    *   **API Key**: `your-secret-key`
+    *   **API Key**: `not-needed` (or any string)
     *   **TTS Model**: `cosyvoice3`
 
 ## Notes

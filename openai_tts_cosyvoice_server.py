@@ -198,7 +198,7 @@ def encode_audio(audio: np.ndarray, sr: int, fmt: str) -> bytes:
             return f.read()
 
 # ---------- FastAPI app ----------
-API_KEY = os.environ.get("TTS_API_KEY", "changeme")
+API_KEY = os.environ.get("TTS_API_KEY", "not-needed")
 
 app = FastAPI(title="CosyVoice3 OpenAI-Compatible TTS")
 
@@ -209,7 +209,8 @@ def list_models():
 @app.post("/v1/audio/speech")
 def audio_speech(req: SpeechRequest, authorization: Optional[str] = Header(default=None)):
     # Simple API key check (Open-WebUI will send: Authorization: Bearer <key>)
-    if API_KEY and API_KEY != "changeme":
+    # If API_KEY is "not-needed", we skip the check.
+    if API_KEY and API_KEY not in ["changeme", "not-needed"]:
         if not authorization or not authorization.startswith("Bearer "):
             raise HTTPException(status_code=401, detail="Missing Bearer token")
         token = authorization.split(" ", 1)[1].strip()
