@@ -365,10 +365,18 @@ app = FastAPI(title="CosyVoice3 OpenAI-Compatible TTS")
 
 @app.get("/", response_class=HTMLResponse)
 def index():
-    """Attractive landing page for the CosyVoice FastAPI server."""
+    """Attractive landing page for the CosyVoice FastAPI server.
+    
+    Note: HTML template is inline for single-file deployment simplicity
+    and to avoid external dependencies. This makes the server easier to
+    distribute and deploy as a standalone file.
+    """
     available_voices = discover_voice_samples()
     voice_count = len(available_voices)
+    # Sanitize values to prevent any potential HTML injection
     backend = "vLLM" if USE_VLLM else "PyTorch"
+    safe_backend = str(backend).replace('<', '&lt;').replace('>', '&gt;')
+    safe_voice_count = int(voice_count)  # Ensure it's an integer
     
     html_content = f"""
     <!DOCTYPE html>
@@ -506,8 +514,8 @@ def index():
                 <h1>🎙️ CosyVoice3 TTS Server</h1>
                 <p>OpenAI-Compatible Text-to-Speech API</p>
                 <div>
-                    <span class="badge">Backend: {backend}</span>
-                    <span class="badge">Voices: {voice_count}</span>
+                    <span class="badge">Backend: {safe_backend}</span>
+                    <span class="badge">Voices: {safe_voice_count}</span>
                     <span class="badge">Model: Fun-CosyVoice3-0.5B</span>
                 </div>
             </div>
@@ -566,7 +574,7 @@ curl -X POST http://localhost:8000/v1/audio/speech \\<br>
             <div class="cards">
                 <div class="card">
                     <h2>🎭 Available Voices</h2>
-                    <p>The server currently has <strong>{voice_count}</strong> voice sample(s) available.</p>
+                    <p>The server currently has <strong>{safe_voice_count}</strong> voice sample(s) available.</p>
                     <p style="margin-top: 10px;">
                         <a href="/v1/voices">View all available voices →</a>
                     </p>
@@ -598,7 +606,7 @@ curl -X POST http://localhost:8000/v1/audio/speech \\<br>
             </div>
 
             <div class="footer">
-                <p>Powered by CosyVoice3 • FastAPI • {backend} Backend</p>
+                <p>Powered by CosyVoice3 • FastAPI • {safe_backend} Backend</p>
                 <p style="margin-top: 10px; opacity: 0.8;">
                     High-quality multilingual text-to-speech with zero-shot voice cloning
                 </p>
