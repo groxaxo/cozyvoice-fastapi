@@ -1,4 +1,5 @@
 import io
+import logging
 import os
 import re
 import sys
@@ -8,8 +9,15 @@ from typing import Optional, Tuple, List
 import numpy as np
 import soundfile as sf
 from fastapi import FastAPI, Header, HTTPException
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import Response, StreamingResponse, HTMLResponse
 from pydantic import BaseModel
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # Add CosyVoice paths
 sys.path.append("CosyVoice")
@@ -27,41 +35,39 @@ if USE_VLLM:
         from cosyvoice.vllm.cosyvoice2 import CosyVoice2ForCausalLM
 
         ModelRegistry.register_model("CosyVoice2ForCausalLM", CosyVoice2ForCausalLM)
-        print("✅ vLLM model registered successfully")
+        logger.info("vLLM model registered successfully")
     except ImportError as e:
-        print(f"❌ Error: vLLM not available. Please install vllm==v0.9.0")
-        print(f"   Error details: {e}")
+        logger.error("vLLM not available. Please install vllm==v0.9.0")
+        logger.debug(f"Import error details: {e}")
         sys.exit(1)
 
 try:
     from cosyvoice.cli.cosyvoice import AutoModel
 except ImportError:
-    print(
-        "Error: Could not import CosyVoice. Make sure you are running this from the directory containing CosyVoice repo."
-    )
+    logger.error("Could not import CosyVoice. Make sure you are running this from the directory containing CosyVoice repo.")
     sys.exit(1)
 
 # Initialize model
 MODEL_DIR = "CosyVoice/pretrained_models/Fun-CosyVoice3-0.5B-2512"
 if not os.path.exists(MODEL_DIR):
-    print(f"Warning: Model directory {MODEL_DIR} not found.")
+    logger.warning(f"Model directory not found at expected path")
 
-print(f"Loading CosyVoice model from {MODEL_DIR}...")
-print(f"Configuration: vLLM={USE_VLLM}, TensorRT={USE_TRT}, FP16={FP16}")
+logger.info(f"Loading CosyVoice model...")
+logger.info(f"Configuration: vLLM={USE_VLLM}, TensorRT={USE_TRT}, FP16={FP16}")
 
 # Initialize model with vLLM/TRT support
 try:
     cosyvoice_model = AutoModel(
         model_dir=MODEL_DIR, load_vllm=USE_VLLM, load_trt=USE_TRT, fp16=FP16
     )
-    print(f"✅ Model loaded successfully")
+    logger.info("Model loaded successfully")
 except Exception as e:
-    print(f"❌ Error loading model: {e}")
-    print("   Falling back to standard PyTorch backend...")
+    logger.error(f"Error loading model with specified backend")
+    logger.info("Falling back to standard PyTorch backend...")
     cosyvoice_model = AutoModel(model_dir=MODEL_DIR)
     USE_VLLM = False
     USE_TRT = False
-    print("✅ Model loaded with standard backend")
+    logger.info("Model loaded with standard backend")
 
 # ---------- Text cleaning ----------
 _MD_CODEBLOCK_RE = re.compile(r"```.*?```", re.DOTALL)
@@ -306,18 +312,14 @@ def cosyvoice_generate_wav(
 
     # CosyVoice3 uses inference_instruct2 for combining instructions with reference audio
     if hasattr(cosyvoice_model, "inference_instruct2"):
-        print(
-            f"DEBUG: Using CosyVoice3 inference_instruct2 | Voice: {voice} | Prompt: {prompt_text}"
-        )
+        logger.debug(f"Using CosyVoice3 inference_instruct2 with voice: {voice}")
         for j in cosyvoice_model.inference_instruct2(
             text, prompt_text, prompt_wav, stream=False, speed=speed
         ):
             audios.append(j["tts_speech"].cpu().numpy())
     else:
         # Fallback to zero_shot if instruct2 is not available (though it should be for CosyVoice3)
-        print(
-            f"DEBUG: Using fallback inference_zero_shot | Voice: {voice} | Prompt: {prompt_text}"
-        )
+        logger.debug(f"Using fallback inference_zero_shot with voice: {voice}")
         for j in cosyvoice_model.inference_zero_shot(
             text, prompt_text, prompt_wav, stream=False, speed=speed
         ):
@@ -359,6 +361,253 @@ def encode_audio(audio: np.ndarray, sr: int, fmt: str) -> bytes:
 
 API_KEY = os.environ.get("TTS_API_KEY", "not-needed")
 app = FastAPI(title="CosyVoice3 OpenAI-Compatible TTS")
+
+
+@app.get("/", response_class=HTMLResponse)
+def index():
+    """Attractive landing page for the CosyVoice FastAPI server."""
+    available_voices = discover_voice_samples()
+    voice_count = len(available_voices)
+    backend = "vLLM" if USE_VLLM else "PyTorch"
+    
+    html_content = f"""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>CosyVoice3 TTS Server</title>
+        <style>
+            * {{
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }}
+            body {{
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                min-height: 100vh;
+                padding: 20px;
+                color: #333;
+            }}
+            .container {{
+                max-width: 1200px;
+                margin: 0 auto;
+            }}
+            .header {{
+                text-align: center;
+                color: white;
+                margin-bottom: 40px;
+                padding: 40px 20px;
+            }}
+            .header h1 {{
+                font-size: 3em;
+                margin-bottom: 10px;
+                text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+            }}
+            .header p {{
+                font-size: 1.3em;
+                opacity: 0.95;
+            }}
+            .badge {{
+                display: inline-block;
+                background: rgba(255,255,255,0.2);
+                padding: 8px 16px;
+                border-radius: 20px;
+                margin: 10px 5px;
+                font-size: 0.9em;
+                backdrop-filter: blur(10px);
+            }}
+            .cards {{
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+                gap: 20px;
+                margin-bottom: 30px;
+            }}
+            .card {{
+                background: white;
+                border-radius: 15px;
+                padding: 30px;
+                box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+                transition: transform 0.3s ease;
+            }}
+            .card:hover {{
+                transform: translateY(-5px);
+            }}
+            .card h2 {{
+                color: #667eea;
+                margin-bottom: 15px;
+                font-size: 1.5em;
+            }}
+            .card p {{
+                color: #666;
+                line-height: 1.6;
+                margin-bottom: 15px;
+            }}
+            .code-block {{
+                background: #f5f5f5;
+                border-left: 4px solid #667eea;
+                padding: 15px;
+                border-radius: 5px;
+                font-family: 'Courier New', monospace;
+                font-size: 0.9em;
+                overflow-x: auto;
+                margin: 15px 0;
+            }}
+            .feature-list {{
+                list-style: none;
+                padding: 0;
+            }}
+            .feature-list li {{
+                padding: 8px 0;
+                color: #555;
+            }}
+            .feature-list li:before {{
+                content: "✓ ";
+                color: #667eea;
+                font-weight: bold;
+                margin-right: 8px;
+            }}
+            .endpoint {{
+                background: #f9f9f9;
+                padding: 10px;
+                border-radius: 5px;
+                margin: 10px 0;
+                font-family: monospace;
+            }}
+            .method {{
+                display: inline-block;
+                padding: 4px 8px;
+                border-radius: 4px;
+                font-weight: bold;
+                margin-right: 10px;
+                color: white;
+            }}
+            .get {{ background: #61affe; }}
+            .post {{ background: #49cc90; }}
+            .footer {{
+                text-align: center;
+                color: white;
+                padding: 20px;
+                margin-top: 40px;
+            }}
+            a {{
+                color: #667eea;
+                text-decoration: none;
+            }}
+            a:hover {{
+                text-decoration: underline;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>🎙️ CosyVoice3 TTS Server</h1>
+                <p>OpenAI-Compatible Text-to-Speech API</p>
+                <div>
+                    <span class="badge">Backend: {backend}</span>
+                    <span class="badge">Voices: {voice_count}</span>
+                    <span class="badge">Model: Fun-CosyVoice3-0.5B</span>
+                </div>
+            </div>
+
+            <div class="cards">
+                <div class="card">
+                    <h2>🚀 Quick Start</h2>
+                    <p>Generate speech using the OpenAI-compatible API:</p>
+                    <div class="code-block">
+curl -X POST http://localhost:8000/v1/audio/speech \\<br>
+  -H "Content-Type: application/json" \\<br>
+  -d '{{'<br>
+    "model": "cosyvoice3",<br>
+    "input": "Hello, world!",<br>
+    "voice": "en"<br>
+  }}' -o output.wav
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2>✨ Features</h2>
+                    <ul class="feature-list">
+                        <li>OpenAI-compatible API endpoints</li>
+                        <li>Multi-language support (9+ languages)</li>
+                        <li>Zero-shot voice cloning</li>
+                        <li>Multiple audio formats (WAV, MP3, FLAC, etc.)</li>
+                        <li>Speed control</li>
+                        <li>Streaming support</li>
+                        <li>Custom voice samples</li>
+                    </ul>
+                </div>
+
+                <div class="card">
+                    <h2>📡 API Endpoints</h2>
+                    <div class="endpoint">
+                        <span class="method get">GET</span> /health
+                    </div>
+                    <div class="endpoint">
+                        <span class="method get">GET</span> /v1/models
+                    </div>
+                    <div class="endpoint">
+                        <span class="method get">GET</span> /v1/voices
+                    </div>
+                    <div class="endpoint">
+                        <span class="method post">POST</span> /v1/audio/speech
+                    </div>
+                    <div class="endpoint">
+                        <span class="method post">POST</span> /v1/warmup
+                    </div>
+                    <p style="margin-top: 15px;">
+                        <a href="/docs" target="_blank">📖 View Full API Documentation</a>
+                    </p>
+                </div>
+            </div>
+
+            <div class="cards">
+                <div class="card">
+                    <h2>🎭 Available Voices</h2>
+                    <p>The server currently has <strong>{voice_count}</strong> voice sample(s) available.</p>
+                    <p style="margin-top: 10px;">
+                        <a href="/v1/voices">View all available voices →</a>
+                    </p>
+                    <p style="margin-top: 15px; color: #888; font-size: 0.9em;">
+                        Add custom voices to the <code>voice_samples/</code> directory to expand voice options.
+                    </p>
+                </div>
+
+                <div class="card">
+                    <h2>🔧 Integration</h2>
+                    <p>Use with Open-WebUI or any OpenAI-compatible client:</p>
+                    <ul class="feature-list" style="margin-top: 15px;">
+                        <li><strong>API Base URL:</strong> http://your-server:8000/v1</li>
+                        <li><strong>Model:</strong> cosyvoice3</li>
+                        <li><strong>API Key:</strong> not-needed (or configured)</li>
+                    </ul>
+                </div>
+
+                <div class="card">
+                    <h2>📚 Documentation</h2>
+                    <p>Comprehensive guides and references:</p>
+                    <ul class="feature-list" style="margin-top: 15px;">
+                        <li><a href="/docs">Interactive API Documentation</a></li>
+                        <li><a href="/redoc">ReDoc API Reference</a></li>
+                        <li>README.md - Setup & Configuration</li>
+                        <li>Voice Mapping Guide</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="footer">
+                <p>Powered by CosyVoice3 • FastAPI • {backend} Backend</p>
+                <p style="margin-top: 10px; opacity: 0.8;">
+                    High-quality multilingual text-to-speech with zero-shot voice cloning
+                </p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    return html_content
 
 
 @app.get("/health")
