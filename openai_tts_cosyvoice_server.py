@@ -312,14 +312,14 @@ def cosyvoice_generate_wav(
 
     # CosyVoice3 uses inference_instruct2 for combining instructions with reference audio
     if hasattr(cosyvoice_model, "inference_instruct2"):
-        logger.debug(f"Using CosyVoice3 inference_instruct2 with voice: {voice}")
+        logger.debug("Using CosyVoice3 inference_instruct2")
         for j in cosyvoice_model.inference_instruct2(
             text, prompt_text, prompt_wav, stream=False, speed=speed
         ):
             audios.append(j["tts_speech"].cpu().numpy())
     else:
         # Fallback to zero_shot if instruct2 is not available (though it should be for CosyVoice3)
-        logger.debug(f"Using fallback inference_zero_shot with voice: {voice}")
+        logger.debug("Using fallback inference_zero_shot")
         for j in cosyvoice_model.inference_zero_shot(
             text, prompt_text, prompt_wav, stream=False, speed=speed
         ):
@@ -369,11 +369,12 @@ def index():
     
     Note: HTML template is inline for single-file deployment simplicity
     and to avoid external dependencies. This makes the server easier to
-    distribute and deploy as a standalone file.
+    distribute and deploy as a standalone file. Dynamic values are
+    sanitized as a defensive measure against potential injection attacks.
     """
     available_voices = discover_voice_samples()
     voice_count = len(available_voices)
-    # Sanitize values to prevent any potential HTML injection
+    # Sanitize values to prevent any potential HTML injection (defensive programming)
     backend = "vLLM" if USE_VLLM else "PyTorch"
     safe_backend = str(backend).replace('<', '&lt;').replace('>', '&gt;')
     safe_voice_count = int(voice_count)  # Ensure it's an integer
