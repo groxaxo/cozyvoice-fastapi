@@ -53,6 +53,8 @@ except ImportError:
 
 # Import quantization libraries if needed
 bnb_config = None
+quantization_active = False  # Track actual quantization status separately from environment setting
+
 if QUANTIZATION_ENABLED:
     try:
         import torch
@@ -66,19 +68,19 @@ if QUANTIZATION_ENABLED:
                 bnb_4bit_compute_dtype=torch.bfloat16,
                 bnb_4bit_use_double_quant=True,
             )
+            quantization_active = True
         elif QUANTIZATION_BITS == 8:
             logger.info("Configuring 8-bit quantization")
             bnb_config = BitsAndBytesConfig(
                 load_in_8bit=True,
                 llm_int8_threshold=6.0,
             )
+            quantization_active = True
         else:
             logger.warning(f"Invalid QUANTIZATION_BITS value: {QUANTIZATION_BITS}. Must be 4 or 8. Disabling quantization.")
-            QUANTIZATION_ENABLED = False
     except ImportError as e:
         logger.warning("BitsAndBytes or transformers not available. Install with: pip install bitsandbytes>=0.41.0 transformers>=4.48.0")
         logger.debug(f"Import error: {e}")
-        QUANTIZATION_ENABLED = False
         bnb_config = None
 
 # Initialize model
@@ -87,8 +89,8 @@ if not os.path.exists(MODEL_DIR):
     logger.warning(f"Model directory not found at expected path")
 
 logger.info(f"Loading CosyVoice model...")
-logger.info(f"Configuration: vLLM={USE_VLLM}, TensorRT={USE_TRT}, FP16={FP16}, Quantization={QUANTIZATION_ENABLED}")
-if QUANTIZATION_ENABLED:
+logger.info(f"Configuration: vLLM={USE_VLLM}, TensorRT={USE_TRT}, FP16={FP16}, Quantization={quantization_active}")
+if quantization_active:
     logger.info(f"Quantization: {QUANTIZATION_BITS}-bit enabled")
 
 # Initialize model with vLLM/TRT/Quantization support
@@ -104,12 +106,11 @@ try:
     
     # Add quantization config if enabled and not using vLLM/TRT
     # (vLLM has its own quantization methods)
-    if QUANTIZATION_ENABLED and bnb_config and not USE_VLLM and not USE_TRT:
+    if quantization_active and bnb_config and not USE_VLLM and not USE_TRT:
         logger.info("Attempting to load model with BitsAndBytes quantization...")
         # Try to pass quantization_config to AutoModel
         # This may require modification of CosyVoice's AutoModel class
         try:
-            import torch
             model_kwargs["quantization_config"] = bnb_config
             model_kwargs["device_map"] = "auto"
             model_kwargs["torch_dtype"] = torch.bfloat16
@@ -118,22 +119,12 @@ try:
         except TypeError as te:
             # AutoModel doesn't support quantization_config parameter
             logger.warning("CosyVoice AutoModel doesn't support quantization_config parameter directly")
-            logger.info("Loading model normally - quantization will be applied post-load if possible")
+            logger.info("Loading model normally - post-load quantization not yet implemented")
             model_kwargs.pop("quantization_config", None)
             model_kwargs.pop("device_map", None)
             model_kwargs.pop("torch_dtype", None)
             cosyvoice_model = AutoModel(**model_kwargs)
-            
-            # Attempt to apply quantization to the LLM component post-load
-            if hasattr(cosyvoice_model, 'model') and hasattr(cosyvoice_model.model, 'llm'):
-                logger.info("Attempting to quantize LLM component post-load...")
-                try:
-                    import torch
-                    from transformers import quantization
-                    # This is a placeholder - actual implementation depends on CosyVoice's internal structure
-                    logger.warning("Post-load quantization requires manual implementation based on CosyVoice internals")
-                except Exception as quant_err:
-                    logger.warning(f"Could not apply post-load quantization: {quant_err}")
+            quantization_active = False  # Mark quantization as not active
             logger.info("Model loaded without quantization")
     else:
         cosyvoice_model = AutoModel(**model_kwargs)
@@ -146,7 +137,7 @@ except Exception as e:
         cosyvoice_model = AutoModel(model_dir=MODEL_DIR)
         USE_VLLM = False
         USE_TRT = False
-        QUANTIZATION_ENABLED = False
+        quantization_active = False  # Use local flag instead of modifying global
         logger.info("Model loaded with standard backend")
     except Exception as fallback_err:
         logger.error(f"Failed to load model even with fallback: {fallback_err}")
@@ -464,7 +455,7 @@ def index():
     
     # Add quantization info to badges
     quant_badge = ""
-    if QUANTIZATION_ENABLED:
+    if quantization_active:
         quant_badge = f'<span class="badge">Quantization: {QUANTIZATION_BITS}-bit</span>'
     
     html_content = f"""
@@ -715,7 +706,7 @@ def health():
         "model": "cosyvoice3",
         "backend": "vllm" if USE_VLLM else "pytorch",
     }
-    if QUANTIZATION_ENABLED:
+    if quantization_active:
         health_info["quantization"] = f"{QUANTIZATION_BITS}-bit"
     return health_info
 
@@ -734,7 +725,7 @@ def warmup():
             "sample_rate": sr,
             "audio_duration_ms": int((len(audio) / sr) * 1000),
         }
-        if QUANTIZATION_ENABLED:
+        if quantization_active:
             warmup_info["quantization"] = f"{QUANTIZATION_BITS}-bit"
         return warmup_info
     except Exception as e:
