@@ -50,7 +50,7 @@ source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate cosyvoice3
 
 echo "Installing quantization dependencies if needed..."
-pip install -q bitsandbytes>=0.41.0 transformers>=4.30.0 accelerate>=0.20.0 2>/dev/null || true
+pip install -q bitsandbytes>=0.41.0 transformers>=4.48.0 accelerate>=0.20.0 2>/dev/null || true
 
 echo ""
 echo "Server starting on http://0.0.0.0:8000"

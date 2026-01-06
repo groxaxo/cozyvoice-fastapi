@@ -408,7 +408,7 @@ Reduce GPU memory usage by 50-75% using BitsAndBytes quantization. The CosyVoice
 
 ```bash
 conda activate cosyvoice3
-pip install bitsandbytes>=0.41.0 transformers>=4.30.0 accelerate>=0.20.0
+pip install bitsandbytes>=0.41.0 transformers>=4.48.0 accelerate>=0.20.0
 ```
 
 #### 8-bit Quantization (Recommended)

@@ -76,7 +76,7 @@ if QUANTIZATION_ENABLED:
             logger.warning(f"Invalid QUANTIZATION_BITS value: {QUANTIZATION_BITS}. Must be 4 or 8. Disabling quantization.")
             QUANTIZATION_ENABLED = False
     except ImportError as e:
-        logger.warning("BitsAndBytes or transformers not available. Install with: pip install bitsandbytes>=0.41.0 transformers>=4.30.0")
+        logger.warning("BitsAndBytes or transformers not available. Install with: pip install bitsandbytes>=0.41.0 transformers>=4.48.0")
         logger.debug(f"Import error: {e}")
         QUANTIZATION_ENABLED = False
         bnb_config = None

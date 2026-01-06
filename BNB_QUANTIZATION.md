@@ -156,7 +156,7 @@ The implementation follows this workflow:
 
 **Required:**
 ```bash
-pip install bitsandbytes>=0.41.0 transformers>=4.30.0 accelerate>=0.20.0
+pip install bitsandbytes>=0.41.0 transformers>=4.48.0 accelerate>=0.20.0
 ```
 
 **Optional (for optimal performance):**
@@ -170,7 +170,7 @@ pip install bitsandbytes>=0.41.0 transformers>=4.30.0 accelerate>=0.20.0
 
 **Solution:**
 ```bash
-pip install bitsandbytes>=0.41.0 transformers>=4.30.0 accelerate>=0.20.0
+pip install bitsandbytes>=0.41.0 transformers>=4.48.0 accelerate>=0.20.0
 ```
 
 #### Issue: "CosyVoice AutoModel doesn't support quantization_config parameter"
