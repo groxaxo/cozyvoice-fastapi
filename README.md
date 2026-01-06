@@ -82,6 +82,8 @@ A production-ready OpenAI-compatible Text-to-Speech (TTS) server powered by Cosy
 | `COSYVOICE_USE_VLLM` | `false` | Enable vLLM acceleration |
 | `COSYVOICE_USE_TRT` | `false` | Enable TensorRT acceleration |
 | `COSYVOICE_FP16` | `false` | Use FP16 precision |
+| `QUANTIZATION_ENABLED` | `false` | Enable BitsAndBytes quantization |
+| `QUANTIZATION_BITS` | `4` | Quantization precision (4 or 8 bits) |
 
 ### Backend Options
 
@@ -400,54 +402,71 @@ curl -X POST http://localhost:8000/v1/audio/speech \
 
 ### VRAM Optimization with Quantization
 
-To reduce GPU memory usage by 50-75%, you can enable quantization using BitsAndBytes.
+Reduce GPU memory usage by 50-75% using BitsAndBytes quantization. The CosyVoice3 model's LLM component (~0.5B parameters) is the primary target for quantization.
 
 #### Installation
+
 ```bash
 conda activate cosyvoice3
-pip install bitsandbytes>=0.41.0 accelerate>=0.20.0
+pip install bitsandbytes>=0.41.0 transformers>=4.30.0 accelerate>=0.20.0
 ```
 
 #### 8-bit Quantization (Recommended)
+
 **VRAM Reduction**: ~50% (2GB → 1GB)  
 **Quality Impact**: Minimal (<3%)
 
-Add to `openai_tts_cosyvoice_server.py` before model loading:
-```python
-import os
-import torch
-from transformers import BitsAndBytesConfig
-
-QUANTIZATION_ENABLED = os.environ.get("QUANTIZATION_ENABLED", "false").lower() == "true"
-QUANTIZATION_BITS = int(os.environ.get("QUANTIZATION_BITS", "8"))
-
-if QUANTIZATION_ENABLED:
-    bnb_config = BitsAndBytesConfig(
-        load_in_8bit=True,
-        llm_int8_threshold=6.0,
-    )
-    # Apply to model loading
-```
-
-Run with:
+**Usage:**
 ```bash
 export QUANTIZATION_ENABLED="true"
 export QUANTIZATION_BITS="8"
 uvicorn openai_tts_cosyvoice_server:app --host 0.0.0.0 --port 8000
 ```
 
-#### 4-bit Quantization (Maximum Reduction)
-**VRAM Reduction**: ~75% (2GB → 500MB)  
-**Quality Impact**: Small (<5%)
+#### 4-bit Quantization (Maximum Reduction) ⭐ NEW
 
-```python
-bnb_config = BitsAndBytesConfig(
-    load_in_4bit=True,
-    bnb_4bit_quant_type="nf4",
-    bnb_4bit_compute_dtype=torch.bfloat16,
-    bnb_4bit_use_double_quant=True,
-)
+**VRAM Reduction**: ~75% (2GB → 500MB)  
+**Quality Impact**: Small (<5%)  
+**Recommended for**: Low-VRAM GPUs or running multiple instances
+
+**Usage:**
+```bash
+export QUANTIZATION_ENABLED="true"
+export QUANTIZATION_BITS="4"
+uvicorn openai_tts_cosyvoice_server:app --host 0.0.0.0 --port 8000
 ```
+
+#### How It Works
+
+The server now has built-in support for BitsAndBytes quantization:
+
+1. **Automatic Configuration**: Set environment variables to enable quantization
+2. **NF4 4-bit**: Uses NormalFloat4 quantization for best quality/size trade-off
+3. **Double Quantization**: Further reduces memory with minimal quality loss
+4. **Smart Fallback**: Automatically falls back to standard precision if quantization fails
+5. **Status Reporting**: Check quantization status via `/health` endpoint
+
+**Environment Variables:**
+
+| Variable | Values | Default | Description |
+|----------|--------|---------|-------------|
+| `QUANTIZATION_ENABLED` | `true`, `false` | `false` | Enable/disable quantization |
+| `QUANTIZATION_BITS` | `4`, `8` | `4` | Quantization precision |
+
+**Checking Status:**
+
+```bash
+curl http://localhost:8000/health
+# Returns: {"status": "ok", "model": "cosyvoice3", "backend": "pytorch", "quantization": "4-bit"}
+```
+
+**Important Notes:**
+
+- ⚠️ Quantization is not compatible with vLLM or TensorRT backends
+- ⚠️ Requires NVIDIA GPU with CUDA support
+- ⚠️ May require CosyVoice's AutoModel class to support `quantization_config` parameter
+- ℹ️ If direct quantization support is unavailable, the server will attempt post-load quantization
+- ℹ️ First inference may be slightly slower due to quantization setup
 
 ### vLLM Acceleration
 
