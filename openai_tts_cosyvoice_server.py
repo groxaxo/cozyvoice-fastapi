@@ -124,7 +124,7 @@ try:
             model_kwargs.pop("device_map", None)
             model_kwargs.pop("torch_dtype", None)
             cosyvoice_model = AutoModel(**model_kwargs)
-            quantization_active = False  # Mark quantization as not active
+            quantization_active = False  # Update module-level flag: quantization not actually active
             logger.info("Model loaded without quantization")
     else:
         cosyvoice_model = AutoModel(**model_kwargs)
@@ -137,7 +137,7 @@ except Exception as e:
         cosyvoice_model = AutoModel(model_dir=MODEL_DIR)
         USE_VLLM = False
         USE_TRT = False
-        quantization_active = False  # Use local flag instead of modifying global
+        quantization_active = False  # Update module-level flag: quantization not active in fallback
         logger.info("Model loaded with standard backend")
     except Exception as fallback_err:
         logger.error(f"Failed to load model even with fallback: {fallback_err}")
