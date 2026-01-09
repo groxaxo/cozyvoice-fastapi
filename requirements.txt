@@ -1,0 +1,12 @@
+fastapi>=0.100.0
+uvicorn>=0.23.0
+pydantic>=2.0.0
+numpy
+soundfile
+python-multipart
+requests
+pytest
+httpx
+
+# Note: For GPU support, please install cudnn via conda:
+# conda install -c conda-forge cudnn=8.9.7.29

@@ -1,60 +1,75 @@
-# Python
+# Logs
+*.log
+
+# Python cache
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
-.Python
-*.egg-info/
-dist/
-build/
 
-# Virtual environments
-venv/
+# Test outputs
+*.wav
+!voice_samples/aimee-en.wav
+!voice_samples/michael-en.wav
+!voice_samples/lucho-es.wav
+!voice_samples/brenda-es.wav
+!voice_samples/facu-es.wav
+!voice_samples/faculiado-es.wav
+!voice_samples/facundito-es.wav
+*.mp3
+!voice_samples/*.mp3
+
+# TensorRT artifacts (generated during setup)
+*.onnx
+*.plan
+
+# Environment
+.env
+.venv
 env/
+venv/
 ENV/
 
-# IDEs
-.vscode/
-.idea/
+# Editor
 *.swp
 *.swo
 *~
+.vscode/
+.idea/
 
-# Logs
-*.log
-server.log
-autonomous.log
-*.log.*
-
-# Audio test outputs
-test_*.wav
-test_*.mp3
-*.wav
-!voice_samples/README.md
-
-# Voice samples - Personal files (users should add their own)
-voice_samples/*
-!voice_samples/README.md
-!voice_samples/.gitkeep
-
-# TTS test outputs
-tts_tests/*.wav
-tts_tests/*.mp3
-
-# OS
-.DS_Store
-Thumbs.db
+# Test directories
+*_test/
+*_results/
+latin_test/
+pichones_aquiles_test/
+speed_test_results/
 
 # Temporary files
 *.tmp
-*.temp
 *.bak
-*.swp
+*.json.bak
+.DS_Store
 
-# Model cache (if using HuggingFace cache)
-.cache/
-huggingface/
+# Model checkpoints (too large for git)
+*.pt
+*.pth
+*.ckpt
+!CosyVoice/
 
-# Jupyter
-.ipynb_checkpoints/
-*.ipynb
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg

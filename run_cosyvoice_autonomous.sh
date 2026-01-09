@@ -26,7 +26,7 @@ done
 # Watchdog loop
 while true; do
   echo "[INFO] Starting CosyVoice server..." >> "$SERVER_LOG"
-  python3 openai_tts_cosyvoice_server.py >> "$SERVER_LOG" 2>&1 || true
+  conda run -n cosyvoice3 uvicorn openai_tts_cosyvoice_server:app --host 0.0.0.0 --port 8092 >> "$SERVER_LOG" 2>&1 || true
   echo "[WARN] Server crashed. Restarting in 5s..." >> "$SERVER_LOG"
   sleep 5
 done

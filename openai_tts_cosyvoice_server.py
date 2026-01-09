@@ -1,5 +1,4 @@
 import io
-import logging
 import os
 import re
 import sys
@@ -9,15 +8,8 @@ from typing import Optional, Tuple, List
 import numpy as np
 import soundfile as sf
 from fastapi import FastAPI, Header, HTTPException
-from fastapi.responses import Response, StreamingResponse, HTMLResponse
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
 
 # Add CosyVoice paths
 sys.path.append("CosyVoice")
@@ -28,10 +20,6 @@ USE_VLLM = os.environ.get("COSYVOICE_USE_VLLM", "false").lower() == "true"
 USE_TRT = os.environ.get("COSYVOICE_USE_TRT", "false").lower() == "true"
 FP16 = os.environ.get("COSYVOICE_FP16", "false").lower() == "true"
 
-# Quantization configuration
-QUANTIZATION_ENABLED = os.environ.get("QUANTIZATION_ENABLED", "false").lower() == "true"
-QUANTIZATION_BITS = int(os.environ.get("QUANTIZATION_BITS", "4"))  # 4 or 8
-
 # Register vLLM model if needed
 if USE_VLLM:
     try:
@@ -39,109 +27,41 @@ if USE_VLLM:
         from cosyvoice.vllm.cosyvoice2 import CosyVoice2ForCausalLM
 
         ModelRegistry.register_model("CosyVoice2ForCausalLM", CosyVoice2ForCausalLM)
-        logger.info("vLLM model registered successfully")
+        print("✅ vLLM model registered successfully")
     except ImportError as e:
-        logger.error("vLLM not available. Please install vllm==v0.9.0")
-        logger.debug(f"Import error details: {e}")
+        print(f"❌ Error: vLLM not available. Please install vllm==v0.9.0")
+        print(f"   Error details: {e}")
         sys.exit(1)
 
 try:
     from cosyvoice.cli.cosyvoice import AutoModel
-except ImportError:
-    logger.error("Could not import CosyVoice. Make sure you are running this from the directory containing CosyVoice repo.")
+except ImportError as e:
+    print(
+        f"Error: Could not import CosyVoice. Make sure you are running this from the directory containing CosyVoice repo.\nDetails: {e}"
+    )
     sys.exit(1)
-
-# Import quantization libraries if needed
-bnb_config = None
-quantization_active = False  # Track actual quantization status separately from environment setting
-
-if QUANTIZATION_ENABLED:
-    try:
-        import torch
-        from transformers import BitsAndBytesConfig
-        
-        if QUANTIZATION_BITS == 4:
-            logger.info("Configuring 4-bit quantization (NF4)")
-            bnb_config = BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_quant_type="nf4",
-                bnb_4bit_compute_dtype=torch.bfloat16,
-                bnb_4bit_use_double_quant=True,
-            )
-            quantization_active = True
-        elif QUANTIZATION_BITS == 8:
-            logger.info("Configuring 8-bit quantization")
-            bnb_config = BitsAndBytesConfig(
-                load_in_8bit=True,
-                llm_int8_threshold=6.0,
-            )
-            quantization_active = True
-        else:
-            logger.warning(f"Invalid QUANTIZATION_BITS value: {QUANTIZATION_BITS}. Must be 4 or 8. Disabling quantization.")
-    except ImportError as e:
-        logger.warning("BitsAndBytes or transformers not available. Install with: pip install bitsandbytes>=0.41.0 transformers>=4.48.0")
-        logger.debug(f"Import error: {e}")
-        bnb_config = None
 
 # Initialize model
 MODEL_DIR = "CosyVoice/pretrained_models/Fun-CosyVoice3-0.5B-2512"
 if not os.path.exists(MODEL_DIR):
-    logger.warning(f"Model directory not found at expected path")
+    print(f"Warning: Model directory {MODEL_DIR} not found.")
 
-logger.info(f"Loading CosyVoice model...")
-logger.info(f"Configuration: vLLM={USE_VLLM}, TensorRT={USE_TRT}, FP16={FP16}, Quantization={quantization_active}")
-if quantization_active:
-    logger.info(f"Quantization: {QUANTIZATION_BITS}-bit enabled")
+print(f"Loading CosyVoice model from {MODEL_DIR}...")
+print(f"Configuration: vLLM={USE_VLLM}, TensorRT={USE_TRT}, FP16={FP16}")
 
-# Initialize model with vLLM/TRT/Quantization support
+# Initialize model with vLLM/TRT support
 try:
-    # Note: CosyVoice AutoModel may not natively support quantization_config
-    # We'll attempt to pass it, but may need to apply quantization differently
-    model_kwargs = {
-        "model_dir": MODEL_DIR,
-        "load_vllm": USE_VLLM,
-        "load_trt": USE_TRT,
-        "fp16": FP16
-    }
-    
-    # Add quantization config if enabled and not using vLLM/TRT
-    # (vLLM has its own quantization methods)
-    if quantization_active and bnb_config and not USE_VLLM and not USE_TRT:
-        logger.info("Attempting to load model with BitsAndBytes quantization...")
-        # Try to pass quantization_config to AutoModel
-        # This may require modification of CosyVoice's AutoModel class
-        try:
-            model_kwargs["quantization_config"] = bnb_config
-            model_kwargs["device_map"] = "auto"
-            model_kwargs["torch_dtype"] = torch.bfloat16
-            cosyvoice_model = AutoModel(**model_kwargs)
-            logger.info(f"Model loaded successfully with {QUANTIZATION_BITS}-bit quantization")
-        except TypeError as te:
-            # AutoModel doesn't support quantization_config parameter
-            logger.warning("CosyVoice AutoModel doesn't support quantization_config parameter directly")
-            logger.info("Loading model normally - post-load quantization not yet implemented")
-            model_kwargs.pop("quantization_config", None)
-            model_kwargs.pop("device_map", None)
-            model_kwargs.pop("torch_dtype", None)
-            cosyvoice_model = AutoModel(**model_kwargs)
-            quantization_active = False  # Update module-level flag: quantization not actually active
-            logger.info("Model loaded without quantization")
-    else:
-        cosyvoice_model = AutoModel(**model_kwargs)
-        logger.info("Model loaded successfully")
-        
+    cosyvoice_model = AutoModel(
+        model_dir=MODEL_DIR, load_vllm=USE_VLLM, load_trt=USE_TRT, fp16=FP16
+    )
+    print(f"✅ Model loaded successfully")
 except Exception as e:
-    logger.error(f"Error loading model with specified backend: {e}")
-    logger.info("Falling back to standard PyTorch backend...")
-    try:
-        cosyvoice_model = AutoModel(model_dir=MODEL_DIR)
-        USE_VLLM = False
-        USE_TRT = False
-        quantization_active = False  # Update module-level flag: quantization not active in fallback
-        logger.info("Model loaded with standard backend")
-    except Exception as fallback_err:
-        logger.error(f"Failed to load model even with fallback: {fallback_err}")
-        raise
+    print(f"❌ Error loading model: {e}")
+    print("   Falling back to standard PyTorch backend...")
+    cosyvoice_model = AutoModel(model_dir=MODEL_DIR)
+    USE_VLLM = False
+    USE_TRT = False
+    print("✅ Model loaded with standard backend")
 
 # ---------- Text cleaning ----------
 _MD_CODEBLOCK_RE = re.compile(r"```.*?```", re.DOTALL)
@@ -261,6 +181,39 @@ MALE_VOICE_NAMES = {
     "fable",
 }
 
+# Hardcoded language mapping for custom voice samples
+# This ensures these voices ALWAYS use the correct language, regardless of Open-WebUI flags
+CUSTOM_VOICE_LANGUAGE_MAP = {
+    # Spanish voices
+    "brenda-es": "es",
+    "brenda": "es",
+    "facundito-es": "es",
+    "facundito": "es",
+    "facu-es": "es",
+    "facu": "es",
+    "faculiado-es": "es",
+    "faculiado": "es",
+    "facunormal-es": "es",
+    "facunormal": "es",
+    "lucho-es": "es",
+    "lucho": "es",
+    "colombiana-es": "es",
+    "colombiana": "es",
+    "vozespanola-es": "es",
+    "vozespanola": "es",
+    "se_fue_alabosta-es": "es",
+    "story_spanish-es": "es",
+    "gemini_generated_video_0b2ae980-es": "es",
+    # English voices
+    "aimee-en": "en",
+    "aimee": "en",
+    "michael-en": "en",
+    "michael": "en",
+    "part_01_valid-en": "en",
+    "speed_test-en": "en",
+    "test_output_corrected-en": "en",
+}
+
 # Voice to language mapping
 VOICE_LANGUAGE_MAP = {
     "es": "es",
@@ -289,30 +242,95 @@ VOICE_LANGUAGE_MAP = {
     "chinese": "zh",
 }
 
-# Female voice prompts - Short and descriptive (following CosyVoice3 examples)
-LANGUAGE_FEMALE_PROMPTS = {
-    "es": "Voz femenina argentina, elegante.",
-    "en": "Female British voice, elegant.",
-    "fr": "Voix féminine française, élégante.",
-    "it": "Voce femminile italiana, elegante.",
-    "pt": "Voz feminina portuguesa, elegante.",
-    "de": "Weibliche deutsche Stimme, elegant.",
-    "ja": "上品な日本人の女性の声。",
-    "ko": "우아한 한국 여성의 목소리.",
-    "zh": "优雅的北京女性声音。",
+# Voice style instructions mapped to OpenAI voice names
+# IMPORTANT: Use SHORT ACTION COMMANDS, not descriptions. Descriptions get read aloud!
+# These should be imperatives like "Speak softly" not "A soft voice"
+VOICE_STYLE_INSTRUCTIONS = {
+    "es": {
+        # Female voices
+        "alloy": "Habla con voz suave y seductora.",
+        "nova": "Habla con tono profesional y elegante.",
+        "shimmer": "Habla con voz dulce y cálida.",
+        # Male voices
+        "echo": "Habla con voz varonil y segura.",
+        "fable": "Habla con tono grave y pausado.",
+        "onyx": "Habla con voz cálida y clara.",
+    },
+    "en": {
+        "alloy": "Speak in a soft, gentle voice.",
+        "nova": "Speak professionally and elegantly.",
+        "shimmer": "Speak warmly and tenderly.",
+        "echo": "Speak in a confident, masculine voice.",
+        "fable": "Speak with a deep, measured voice.",
+        "onyx": "Speak warmly and clearly.",
+    },
+    "fr": {
+        "alloy": "Parle avec une voix douce.",
+        "nova": "Parle avec élégance.",
+        "shimmer": "Parle chaleureusement.",
+        "echo": "Parle avec une voix virile.",
+        "fable": "Parle avec une voix grave.",
+        "onyx": "Parle chaleureusement.",
+    },
+    "de": {
+        "alloy": "Sprich mit sanfter Stimme.",
+        "nova": "Sprich elegant.",
+        "shimmer": "Sprich warm und freundlich.",
+        "echo": "Sprich mit männlicher Stimme.",
+        "fable": "Sprich mit tiefer Stimme.",
+        "onyx": "Sprich warm und klar.",
+    },
+    "it": {
+        "alloy": "Parla con voce morbida.",
+        "nova": "Parla con eleganza.",
+        "shimmer": "Parla con calore.",
+        "echo": "Parla con voce virile.",
+        "fable": "Parla con voce profonda.",
+        "onyx": "Parla con calore.",
+    },
+    "pt": {
+        "alloy": "Fale com voz suave.",
+        "nova": "Fale com elegância.",
+        "shimmer": "Fale com carinho.",
+        "echo": "Fale com voz viril.",
+        "fable": "Fale com voz grave.",
+        "onyx": "Fale com calor.",
+    },
+    "ja": {
+        "alloy": "優しく話してください。",
+        "nova": "エレガントに話してください。",
+        "shimmer": "温かく話してください。",
+        "echo": "男らしく話してください。",
+        "fable": "低い声で話してください。",
+        "onyx": "温かく話してください。",
+    },
+    "ko": {
+        "alloy": "부드럽게 말해주세요.",
+        "nova": "우아하게 말해주세요.",
+        "shimmer": "따뜻하게 말해주세요.",
+        "echo": "남성적으로 말해주세요.",
+        "fable": "낮은 목소리로 말해주세요.",
+        "onyx": "따뜻하게 말해주세요.",
+    },
+    "zh": {
+        "alloy": "请用柔和的声音说。",
+        "nova": "请优雅地说。",
+        "shimmer": "请温暖地说。",
+        "echo": "请用男性化的声音说。",
+        "fable": "请用低沉的声音说。",
+        "onyx": "请温暖地说。",
+    },
 }
 
-# Male voice prompts
+# Keep old name for backwards compatibility but reference new dict
+VOICE_PROMPTS = VOICE_STYLE_INSTRUCTIONS
+
+# For backward compatibility - use alloy for female, echo for male
+LANGUAGE_FEMALE_PROMPTS = {
+    lang: prompts["alloy"] for lang, prompts in VOICE_STYLE_INSTRUCTIONS.items()
+}
 LANGUAGE_MALE_PROMPTS = {
-    "es": "Voz masculina argentina, distinguida.",
-    "en": "Male British voice, distinguished.",
-    "fr": "Voix masculine française, distinguée.",
-    "it": "Voce maschile italiana, distinta.",
-    "pt": "Voz masculina portuguesa, distinta.",
-    "de": "Männliche deutsche Stimme, vornehm.",
-    "ja": "日本人の男性の声、独特。",
-    "ko": "색다른 한국 남성의 목소리.",
-    "zh": "有表现力的北京男性声音。",
+    lang: prompts["echo"] for lang, prompts in VOICE_STYLE_INSTRUCTIONS.items()
 }
 
 
@@ -360,18 +378,56 @@ def build_prompt_text(voice: Optional[str]) -> str:
         return f"{base_prompt}<|endofprompt|>"
 
     voice_key = voice.lower()
-    is_male = any(name in voice_key for name in MALE_VOICE_NAMES)
 
+    # Get available voice samples to check if this is a custom voice
+    available_voices = discover_voice_samples()
+
+    # Detect language - PRIORITIZE custom voice language map
     detected_lang = None
-    for lang in ["es", "en", "fr", "de", "it", "pt", "ja", "ko", "zh"]:
-        if f"-{lang}" in voice_key or voice_key == lang:
-            detected_lang = lang
-            break
-    if not detected_lang:
-        detected_lang = VOICE_LANGUAGE_MAP.get(voice_key)
 
-    prompts = LANGUAGE_MALE_PROMPTS if is_male else LANGUAGE_FEMALE_PROMPTS
-    instruction = prompts.get(detected_lang, "A natural and professional voice.")
+    # First check if this voice has a hardcoded language mapping
+    if voice_key in CUSTOM_VOICE_LANGUAGE_MAP:
+        detected_lang = CUSTOM_VOICE_LANGUAGE_MAP[voice_key]
+        print(f"🔒 Using hardcoded language for {voice_key}: {detected_lang}")
+    else:
+        # Fall back to automatic detection from suffix or voice name
+        for lang in ["es", "en", "fr", "de", "it", "pt", "ja", "ko", "zh"]:
+            if f"-{lang}" in voice_key or voice_key == lang:
+                detected_lang = lang
+                break
+        if not detected_lang:
+            detected_lang = VOICE_LANGUAGE_MAP.get(voice_key, "en")
+
+    # Check if this is an OpenAI voice name (alloy, nova, shimmer, echo, fable, onyx)
+    openai_voices = ["alloy", "nova", "shimmer", "echo", "fable", "onyx"]
+
+    # Extract base voice name (without language suffix) to check if it's a custom voice
+    base_voice_name = voice_key.replace(f"-{detected_lang}", "")
+
+    # If this is a CUSTOM voice with its own sample file (like brenda-es, facundito-es),
+    # don't add instruction - the sample file itself contains the voice characteristics
+    if (
+        voice_key in available_voices
+        and base_voice_name not in openai_voices
+        and voice_key not in ["es", "en", "fr", "de", "it", "pt", "ja", "ko", "zh"]
+    ):
+        print(f"🎤 Using custom voice sample: {voice_key} (no instruction needed)")
+        return f"{base_prompt}<|endofprompt|>"
+
+    instruction = None
+    if base_voice_name in openai_voices and detected_lang in VOICE_PROMPTS:
+        # Use character-specific prompt for OpenAI voice names (e.g., alloy-es, echo-en)
+        instruction = VOICE_PROMPTS[detected_lang].get(base_voice_name)
+        print(
+            f"🎭 Using character prompt: {base_voice_name} ({detected_lang}) - {instruction[:50]}..."
+        )
+
+    # Fallback to male/female prompts for generic language voices (es, en, etc.)
+    if not instruction:
+        is_male = any(name in voice_key for name in MALE_VOICE_NAMES)
+        prompts = LANGUAGE_MALE_PROMPTS if is_male else LANGUAGE_FEMALE_PROMPTS
+        instruction = prompts.get(detected_lang, "A natural and professional voice.")
+        print(f"🗣️ Using generic voice prompt: {voice_key} - {instruction[:50]}...")
 
     # FORMAT: "You are a helpful assistant. [Instruction]<|endofprompt|>"
     return f"{base_prompt} {instruction}<|endofprompt|>"
@@ -386,14 +442,18 @@ def cosyvoice_generate_wav(
 
     # CosyVoice3 uses inference_instruct2 for combining instructions with reference audio
     if hasattr(cosyvoice_model, "inference_instruct2"):
-        logger.debug("Using CosyVoice3 inference_instruct2")
+        print(
+            f"DEBUG: Using CosyVoice3 inference_instruct2 | Voice: {voice} | Prompt: {prompt_text}"
+        )
         for j in cosyvoice_model.inference_instruct2(
             text, prompt_text, prompt_wav, stream=False, speed=speed
         ):
             audios.append(j["tts_speech"].cpu().numpy())
     else:
         # Fallback to zero_shot if instruct2 is not available (though it should be for CosyVoice3)
-        logger.debug("Using fallback inference_zero_shot")
+        print(
+            f"DEBUG: Using fallback inference_zero_shot | Voice: {voice} | Prompt: {prompt_text}"
+        )
         for j in cosyvoice_model.inference_zero_shot(
             text, prompt_text, prompt_wav, stream=False, speed=speed
         ):
@@ -437,278 +497,13 @@ API_KEY = os.environ.get("TTS_API_KEY", "not-needed")
 app = FastAPI(title="CosyVoice3 OpenAI-Compatible TTS")
 
 
-@app.get("/", response_class=HTMLResponse)
-def index():
-    """Attractive landing page for the CosyVoice FastAPI server.
-    
-    Note: HTML template is inline for single-file deployment simplicity
-    and to avoid external dependencies. This makes the server easier to
-    distribute and deploy as a standalone file. Dynamic values are
-    sanitized as a defensive measure against potential injection attacks.
-    """
-    available_voices = discover_voice_samples()
-    voice_count = len(available_voices)
-    # Sanitize values to prevent any potential HTML injection (defensive programming)
-    backend = "vLLM" if USE_VLLM else "PyTorch"
-    safe_backend = str(backend).replace('<', '&lt;').replace('>', '&gt;')
-    safe_voice_count = int(voice_count)  # Ensure it's an integer
-    
-    # Add quantization info to badges
-    quant_badge = ""
-    if quantization_active:
-        quant_badge = f'<span class="badge">Quantization: {QUANTIZATION_BITS}-bit</span>'
-    
-    html_content = f"""
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>CosyVoice3 TTS Server</title>
-        <style>
-            * {{
-                margin: 0;
-                padding: 0;
-                box-sizing: border-box;
-            }}
-            body {{
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                min-height: 100vh;
-                padding: 20px;
-                color: #333;
-            }}
-            .container {{
-                max-width: 1200px;
-                margin: 0 auto;
-            }}
-            .header {{
-                text-align: center;
-                color: white;
-                margin-bottom: 40px;
-                padding: 40px 20px;
-            }}
-            .header h1 {{
-                font-size: 3em;
-                margin-bottom: 10px;
-                text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
-            }}
-            .header p {{
-                font-size: 1.3em;
-                opacity: 0.95;
-            }}
-            .badge {{
-                display: inline-block;
-                background: rgba(255,255,255,0.2);
-                padding: 8px 16px;
-                border-radius: 20px;
-                margin: 10px 5px;
-                font-size: 0.9em;
-                backdrop-filter: blur(10px);
-            }}
-            .cards {{
-                display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-                gap: 20px;
-                margin-bottom: 30px;
-            }}
-            .card {{
-                background: white;
-                border-radius: 15px;
-                padding: 30px;
-                box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-                transition: transform 0.3s ease;
-            }}
-            .card:hover {{
-                transform: translateY(-5px);
-            }}
-            .card h2 {{
-                color: #667eea;
-                margin-bottom: 15px;
-                font-size: 1.5em;
-            }}
-            .card p {{
-                color: #666;
-                line-height: 1.6;
-                margin-bottom: 15px;
-            }}
-            .code-block {{
-                background: #f5f5f5;
-                border-left: 4px solid #667eea;
-                padding: 15px;
-                border-radius: 5px;
-                font-family: 'Courier New', monospace;
-                font-size: 0.9em;
-                overflow-x: auto;
-                margin: 15px 0;
-            }}
-            .feature-list {{
-                list-style: none;
-                padding: 0;
-            }}
-            .feature-list li {{
-                padding: 8px 0;
-                color: #555;
-            }}
-            .feature-list li:before {{
-                content: "✓ ";
-                color: #667eea;
-                font-weight: bold;
-                margin-right: 8px;
-            }}
-            .endpoint {{
-                background: #f9f9f9;
-                padding: 10px;
-                border-radius: 5px;
-                margin: 10px 0;
-                font-family: monospace;
-            }}
-            .method {{
-                display: inline-block;
-                padding: 4px 8px;
-                border-radius: 4px;
-                font-weight: bold;
-                margin-right: 10px;
-                color: white;
-            }}
-            .get {{ background: #61affe; }}
-            .post {{ background: #49cc90; }}
-            .footer {{
-                text-align: center;
-                color: white;
-                padding: 20px;
-                margin-top: 40px;
-            }}
-            a {{
-                color: #667eea;
-                text-decoration: none;
-            }}
-            a:hover {{
-                text-decoration: underline;
-            }}
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="header">
-                <h1>🎙️ CosyVoice3 TTS Server</h1>
-                <p>OpenAI-Compatible Text-to-Speech API</p>
-                <div>
-                    <span class="badge">Backend: {safe_backend}</span>
-                    <span class="badge">Voices: {safe_voice_count}</span>
-                    <span class="badge">Model: Fun-CosyVoice3-0.5B</span>
-                    {quant_badge}
-                </div>
-            </div>
-
-            <div class="cards">
-                <div class="card">
-                    <h2>🚀 Quick Start</h2>
-                    <p>Generate speech using the OpenAI-compatible API:</p>
-                    <div class="code-block">
-curl -X POST http://localhost:8000/v1/audio/speech \\<br>
-  -H "Content-Type: application/json" \\<br>
-  -d '{{'<br>
-    "model": "cosyvoice3",<br>
-    "input": "Hello, world!",<br>
-    "voice": "en"<br>
-  }}' -o output.wav
-                    </div>
-                </div>
-
-                <div class="card">
-                    <h2>✨ Features</h2>
-                    <ul class="feature-list">
-                        <li>OpenAI-compatible API endpoints</li>
-                        <li>Multi-language support (9+ languages)</li>
-                        <li>Zero-shot voice cloning</li>
-                        <li>Multiple audio formats (WAV, MP3, FLAC, etc.)</li>
-                        <li>Speed control</li>
-                        <li>Streaming support</li>
-                        <li>Custom voice samples</li>
-                    </ul>
-                </div>
-
-                <div class="card">
-                    <h2>📡 API Endpoints</h2>
-                    <div class="endpoint">
-                        <span class="method get">GET</span> /health
-                    </div>
-                    <div class="endpoint">
-                        <span class="method get">GET</span> /v1/models
-                    </div>
-                    <div class="endpoint">
-                        <span class="method get">GET</span> /v1/voices
-                    </div>
-                    <div class="endpoint">
-                        <span class="method post">POST</span> /v1/audio/speech
-                    </div>
-                    <div class="endpoint">
-                        <span class="method post">POST</span> /v1/warmup
-                    </div>
-                    <p style="margin-top: 15px;">
-                        <a href="/docs" target="_blank">📖 View Full API Documentation</a>
-                    </p>
-                </div>
-            </div>
-
-            <div class="cards">
-                <div class="card">
-                    <h2>🎭 Available Voices</h2>
-                    <p>The server currently has <strong>{safe_voice_count}</strong> voice sample(s) available.</p>
-                    <p style="margin-top: 10px;">
-                        <a href="/v1/voices">View all available voices →</a>
-                    </p>
-                    <p style="margin-top: 15px; color: #888; font-size: 0.9em;">
-                        Add custom voices to the <code>voice_samples/</code> directory to expand voice options.
-                    </p>
-                </div>
-
-                <div class="card">
-                    <h2>🔧 Integration</h2>
-                    <p>Use with Open-WebUI or any OpenAI-compatible client:</p>
-                    <ul class="feature-list" style="margin-top: 15px;">
-                        <li><strong>API Base URL:</strong> http://your-server:8000/v1</li>
-                        <li><strong>Model:</strong> cosyvoice3</li>
-                        <li><strong>API Key:</strong> not-needed (or configured)</li>
-                    </ul>
-                </div>
-
-                <div class="card">
-                    <h2>📚 Documentation</h2>
-                    <p>Comprehensive guides and references:</p>
-                    <ul class="feature-list" style="margin-top: 15px;">
-                        <li><a href="/docs">Interactive API Documentation</a></li>
-                        <li><a href="/redoc">ReDoc API Reference</a></li>
-                        <li>README.md - Setup & Configuration</li>
-                        <li>Voice Mapping Guide</li>
-                    </ul>
-                </div>
-            </div>
-
-            <div class="footer">
-                <p>Powered by CosyVoice3 • FastAPI • {safe_backend} Backend</p>
-                <p style="margin-top: 10px; opacity: 0.8;">
-                    High-quality multilingual text-to-speech with zero-shot voice cloning
-                </p>
-            </div>
-        </div>
-    </body>
-    </html>
-    """
-    return html_content
-
-
 @app.get("/health")
 def health():
-    health_info = {
+    return {
         "status": "ok",
         "model": "cosyvoice3",
         "backend": "vllm" if USE_VLLM else "pytorch",
     }
-    if quantization_active:
-        health_info["quantization"] = f"{QUANTIZATION_BITS}-bit"
-    return health_info
 
 
 @app.post("/v1/warmup")
@@ -718,16 +513,13 @@ def warmup():
         test_text = "Hello world"
         test_voice = "en"
         audio, sr = cosyvoice_generate_wav(test_text, test_voice, speed=1.0)
-        warmup_info = {
+        return {
             "status": "warmed",
             "model": "cosyvoice3",
             "backend": "vllm" if USE_VLLM else "pytorch",
             "sample_rate": sr,
             "audio_duration_ms": int((len(audio) / sr) * 1000),
         }
-        if quantization_active:
-            warmup_info["quantization"] = f"{QUANTIZATION_BITS}-bit"
-        return warmup_info
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Warmup failed: {str(e)}")
 
@@ -765,6 +557,62 @@ def audio_speech(
             raise HTTPException(status_code=401)
         if authorization.split(" ", 1)[1].strip() != API_KEY:
             raise HTTPException(status_code=401)
+
+    # 🆕 OVERRIDE VOICE BASED ON MODEL NAME (e.g., cosyvoice-es, cosyvoice-en)
+    # Preserve OpenAI voice names (alloy, nova, shimmer, echo, fable, onyx)
+    resolved_voice = req.voice
+
+    # Check if the requested voice is a "known custom voice" locally
+    available_voices = discover_voice_samples()
+    is_custom_voice = False
+    if req.voice:
+        voice_lower = req.voice.lower()
+        # If it exists in our local samples AND isn't just a generic language code
+        if voice_lower in available_voices and voice_lower not in [
+            "es",
+            "en",
+            "fr",
+            "de",
+            "it",
+            "pt",
+            "ja",
+            "ko",
+            "zh",
+        ]:
+            # Also exclude standard OpenAI names if they don't have custom samples (though discover_voice_samples usually implies files exist)
+            # But let's be safe: if I have a file named 'alloy.wav', that's a custom sample overriding the standard one.
+            is_custom_voice = True
+
+    if req.model and not is_custom_voice:
+        model_lower = req.model.lower()
+        supported_langs = ["es", "en", "fr", "de", "it", "pt", "ja", "ko", "zh"]
+        for lang in supported_langs:
+            if model_lower.endswith(f"-{lang}"):
+                # Check if voice is an OpenAI voice name
+                openai_voice_names = [
+                    "alloy",
+                    "nova",
+                    "shimmer",
+                    "echo",
+                    "fable",
+                    "onyx",
+                ]
+                voice_lower = (req.voice or "en").lower()
+
+                if voice_lower in openai_voice_names:
+                    # Combine voice name with language: alloy-es, nova-en, etc.
+                    resolved_voice = f"{voice_lower}-{lang}"
+                    print(
+                        f"🎯 Model override: {req.model} + {req.voice} → {resolved_voice}"
+                    )
+                else:
+                    # For generic voices, just use the language
+                    resolved_voice = lang
+                    print(f"🎯 Model override: {req.model} → {lang}")
+                break
+    elif is_custom_voice:
+        print(f"🛡️ Preserving custom voice: {req.voice} (ignores model override)")
+
     norm = req.normalization_options or NormalizationOptions()
     cleaned = clean_text_for_tts(
         req.input, normalize=norm.normalize, unit_normalization=norm.unit_normalization
@@ -772,7 +620,7 @@ def audio_speech(
     chunks = split_for_tts(cleaned)
     audios, sr = [], None
     for chunk in chunks:
-        audio, this_sr = cosyvoice_generate_wav(chunk, req.voice, req.speed)
+        audio, this_sr = cosyvoice_generate_wav(chunk, resolved_voice, req.speed)
         if sr is None:
             sr = this_sr
         audios.append(audio)
