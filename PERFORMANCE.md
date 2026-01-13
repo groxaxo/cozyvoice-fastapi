@@ -21,7 +21,7 @@ This guide provides detailed performance benchmarks, optimization strategies, an
 | **vLLM + FP16** | 0.362 | 6.84s | 1.01x | ✅ Stable |
 | **TensorRT + FP16** | 0.340 | 6.35s | 1.07x | ⚠️ Minor issues |
 
-*\*ONNX performance estimates based on typical ONNX Runtime optimization gains. Actual performance may vary by hardware.*
+*\*ONNX performance estimates based on typical ONNX Runtime optimization gains over PyTorch. Actual performance may vary by hardware. Formal benchmarks pending - these estimates represent expected improvements based on ONNX Runtime documentation and similar model optimizations.*
 
 **Note**: ONNX support is now **enabled by default** (`COSYVOICE_USE_ONNX=true`). This provides a good balance between performance and ease of setup.
 

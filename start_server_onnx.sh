@@ -1,5 +1,5 @@
 #!/bin/bash
-# CozyVoice3 Server with ONNX Acceleration (Default Configuration)
+# CosyVoice3 Server with ONNX Acceleration (Default Configuration)
 #
 # This script demonstrates running the server with ONNX-optimized 
 # Flow and HiFi-GAN modules for improved inference performance.
@@ -21,7 +21,7 @@ export COSYVOICE_ONNX_REPO=Lourdle/Fun-CosyVoice3-0.5B-2512_ONNX
 # export COSYVOICE_ONNX_REPO=your-username/your-onnx-repo
 
 # Start server
-echo "Starting CozyVoice3 server with ONNX acceleration..."
+echo "Starting CosyVoice3 server with ONNX acceleration..."
 echo "ONNX Repository: $COSYVOICE_ONNX_REPO"
 echo ""
 
