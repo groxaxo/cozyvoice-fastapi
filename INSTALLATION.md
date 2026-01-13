@@ -113,6 +113,217 @@ python -c "import torch; print(f'PyTorch: {torch.__version__}'); print(f'CUDA Av
 
 ---
 
+## ONNX Support (Enabled by Default)
+
+The server now supports ONNX-optimized Flow and HiFi-GAN modules for improved inference performance. This feature is **enabled by default** and provides a good balance between performance and ease of setup.
+
+### Overview
+
+- **Status**: Enabled by default (`COSYVOICE_USE_ONNX=true`)
+- **Models**: Optimized ONNX versions of Flow and HiFi-GAN modules
+- **Source**: Automatically downloaded from Hugging Face (`Lourdle/Fun-CosyVoice3-0.5B-2512_ONNX`)
+- **Compatibility**: Works alongside vLLM, TensorRT, and quantization options
+
+### Quick Start with ONNX
+
+**1. Default Configuration (ONNX Enabled)**
+
+The server automatically enables ONNX support. Just start normally:
+
+```bash
+conda activate cosyvoice3
+uvicorn openai_tts_cosyvoice_server:app --host 0.0.0.0 --port 8092
+```
+
+On first run, the server will automatically download the ONNX models if they're not present.
+
+**2. Disable ONNX (Use PyTorch)**
+
+If you prefer the original PyTorch implementation:
+
+```bash
+export COSYVOICE_USE_ONNX=false
+conda activate cosyvoice3
+uvicorn openai_tts_cosyvoice_server:app --host 0.0.0.0 --port 8092
+```
+
+**3. Use Custom ONNX Repository**
+
+To use a different Hugging Face repository for ONNX models:
+
+```bash
+export COSYVOICE_USE_ONNX=true
+export COSYVOICE_ONNX_REPO=your-username/custom-onnx-repo
+conda activate cosyvoice3
+uvicorn openai_tts_cosyvoice_server:app --host 0.0.0.0 --port 8092
+```
+
+### ONNX Models Details
+
+The ONNX implementation uses the following models:
+
+**Flow Model**:
+- `flow_fp32.onnx` - Standard precision (used when `COSYVOICE_FP16=false`)
+- `flow_fp16.onnx` - Half precision (used when `COSYVOICE_FP16=true`)
+
+**HiFi-GAN Model**:
+- `hift.onnx` - Vocoder model for high-quality audio generation
+
+**Default Repository**: `Lourdle/Fun-CosyVoice3-0.5B-2512_ONNX`
+
+**Model Directory**: `CosyVoice/pretrained_models/Fun-CosyVoice3-0.5B-2512/`
+
+### Automatic Download
+
+The server automatically downloads ONNX models on first run if they're not present:
+
+```
+INFO: Loading CosyVoice model...
+INFO: Configuration: vLLM=False, TensorRT=False, FP16=False, Quantization=False, ONNX=True
+INFO: Downloading ONNX models (flow_fp32.onnx, hift.onnx) from Hugging Face repo Lourdle/Fun-CosyVoice3-0.5B-2512_ONNX...
+INFO: ONNX models downloaded successfully.
+INFO: Model loaded successfully
+```
+
+### Manual Download (Optional)
+
+If automatic download fails or you want to pre-download the models:
+
+```bash
+conda activate cosyvoice3
+pip install huggingface_hub
+
+# Download FP32 models
+python -c "
+from huggingface_hub import hf_hub_download
+model_dir = 'CosyVoice/pretrained_models/Fun-CosyVoice3-0.5B-2512'
+repo = 'Lourdle/Fun-CosyVoice3-0.5B-2512_ONNX'
+hf_hub_download(repo_id=repo, filename='flow_fp32.onnx', local_dir=model_dir)
+hf_hub_download(repo_id=repo, filename='hift.onnx', local_dir=model_dir)
+print('ONNX models downloaded successfully!')
+"
+
+# For FP16 (optional, only if using COSYVOICE_FP16=true)
+python -c "
+from huggingface_hub import hf_hub_download
+model_dir = 'CosyVoice/pretrained_models/Fun-CosyVoice3-0.5B-2512'
+repo = 'Lourdle/Fun-CosyVoice3-0.5B-2512_ONNX'
+hf_hub_download(repo_id=repo, filename='flow_fp16.onnx', local_dir=model_dir)
+print('FP16 ONNX model downloaded successfully!')
+"
+```
+
+### Verifying ONNX Installation
+
+**1. Check Health Endpoint**
+
+```bash
+curl http://localhost:8092/health
+```
+
+Expected response with ONNX enabled:
+```json
+{
+  "status": "ok",
+  "model": "cosyvoice3",
+  "backend": "pytorch",
+  "onnx": true
+}
+```
+
+**2. Check Server Logs**
+
+Look for ONNX-related messages in the server output:
+```
+INFO: Configuration: vLLM=False, TensorRT=False, FP16=False, Quantization=False, ONNX=True
+INFO: ONNX flow/hift models found in model directory.
+```
+
+**3. Check Web Interface**
+
+Visit `http://localhost:8092/` in your browser. The ONNX status will be displayed as a badge in the page header.
+
+### ONNX Requirements
+
+**Python Packages**:
+- `huggingface_hub` - For automatic model download (installed via requirements.txt)
+- ONNX Runtime (included with CosyVoice dependencies)
+
+**Note**: cuDNN is recommended for optimal ONNX Runtime performance on NVIDIA GPUs:
+```bash
+conda install -c conda-forge cudnn=8.9.7.29 -y
+```
+
+### Combining ONNX with Other Options
+
+ONNX can be combined with other acceleration options:
+
+**ONNX + FP16**:
+```bash
+export COSYVOICE_USE_ONNX=true
+export COSYVOICE_FP16=true
+uvicorn openai_tts_cosyvoice_server:app --host 0.0.0.0 --port 8092
+```
+
+**ONNX + vLLM**:
+```bash
+export COSYVOICE_USE_ONNX=true
+export COSYVOICE_USE_VLLM=true
+uvicorn openai_tts_cosyvoice_server:app --host 0.0.0.0 --port 8092
+```
+
+**Note**: When using TensorRT (`COSYVOICE_USE_TRT=true`), ONNX support for the Flow model is handled differently as TensorRT uses its own ONNX conversion.
+
+### Troubleshooting ONNX
+
+**ONNX Models Not Downloading**
+
+```bash
+# Check internet connectivity to Hugging Face
+ping huggingface.co
+
+# Verify huggingface_hub is installed
+pip show huggingface_hub
+
+# Manually download models (see Manual Download section above)
+```
+
+**ONNX Runtime Errors**
+
+```bash
+# Ensure cuDNN is installed for GPU acceleration
+conda install -c conda-forge cudnn=8.9.7.29 -y
+
+# Check ONNX Runtime is available
+python -c "import onnxruntime; print(onnxruntime.__version__)"
+```
+
+**Performance Issues with ONNX**
+
+```bash
+# Try disabling ONNX to compare performance
+export COSYVOICE_USE_ONNX=false
+
+# Or try FP16 for faster inference
+export COSYVOICE_FP16=true
+export COSYVOICE_USE_ONNX=true
+```
+
+**Wrong Precision Model**
+
+If the server is loading the wrong precision ONNX model:
+```bash
+# For FP32
+export COSYVOICE_FP16=false
+export COSYVOICE_USE_ONNX=true
+
+# For FP16
+export COSYVOICE_FP16=true
+export COSYVOICE_USE_ONNX=true
+```
+
+---
+
 ## TensorRT Installation (Optional - For Maximum Performance)
 
 TensorRT provides 2-3x faster inference for the Flow model. Follow these steps to enable it:
@@ -171,9 +382,28 @@ print('TensorRT engine generated successfully!')
 
 ## Starting the Server
 
-### Standard Server (PyTorch)
+### Standard Server (PyTorch with ONNX - Default)
 
 ```bash
+conda activate cosyvoice3
+uvicorn openai_tts_cosyvoice_server:app --host 0.0.0.0 --port 8092
+```
+
+**Note**: ONNX is enabled by default for optimized performance.
+
+### PyTorch Only (ONNX Disabled)
+
+```bash
+export COSYVOICE_USE_ONNX=false
+conda activate cosyvoice3
+uvicorn openai_tts_cosyvoice_server:app --host 0.0.0.0 --port 8092
+```
+
+### With ONNX + FP16
+
+```bash
+export COSYVOICE_USE_ONNX=true
+export COSYVOICE_FP16=true
 conda activate cosyvoice3
 uvicorn openai_tts_cosyvoice_server:app --host 0.0.0.0 --port 8092
 ```
@@ -302,11 +532,16 @@ tail -f server.log
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `COSYVOICE_USE_ONNX` | `true` | Enable ONNX-optimized Flow/HiFi-GAN modules |
+| `COSYVOICE_ONNX_REPO` | `Lourdle/Fun-CosyVoice3-0.5B-2512_ONNX` | Hugging Face repository for ONNX models |
 | `COSYVOICE_USE_VLLM` | `false` | Enable vLLM acceleration for LLM |
 | `COSYVOICE_USE_TRT` | `false` | Enable TensorRT acceleration for Flow model |
 | `COSYVOICE_FP16` | `false` | Use FP16 precision (faster, less memory) |
+| `QUANTIZATION_ENABLED` | `false` | Enable BitsAndBytes quantization |
+| `QUANTIZATION_BITS` | `4` | Quantization bits (4 or 8) |
 | `VLLM_GPU_MEMORY_UTILIZATION` | `0.9` | GPU memory fraction for vLLM |
 | `CUDA_VISIBLE_DEVICES` | All GPUs | Specify which GPUs to use (e.g., `0,1`) |
+| `TTS_API_KEY` | `not-needed` | API key for authentication (optional) |
 
 ---
 
