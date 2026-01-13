@@ -7,6 +7,7 @@ python-multipart
 requests
 pytest
 httpx
+huggingface_hub
 
 # Note: For GPU support, please install cudnn via conda:
 # conda install -c conda-forge cudnn=8.9.7.29
